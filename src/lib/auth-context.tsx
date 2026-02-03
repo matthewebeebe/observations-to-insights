@@ -60,6 +60,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signInWithPopup(auth, provider)
       .then((result) => {
         console.log('Sign in successful:', result.user.email);
+
+        // Notify app owner of sign-in (fire-and-forget)
+        fetch('/api/notify-signin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userName: result.user.displayName,
+            userEmail: result.user.email,
+          }),
+        }).catch((err) => console.error('Sign-in notification failed:', err));
       })
       .catch((error) => {
         console.error('Sign in error:', error.code, error.message);

@@ -16,6 +16,7 @@ A design thinking tool that guides students through a synthesis process: **Obser
 - **Google Authentication**: Real Google OAuth sign-in via Firebase Auth. Each user's data is isolated by their UID.
 - **Firestore Security Rules**: Per-user data isolation — users can only access their own projects and linked observations/harms/criteria/strategies (rules verify parent project ownership)
 - **Deployed to Vercel**: Live at production URL, auto-deploys from GitHub `main` branch
+- **Sign-in Email Notifications**: App owner receives an email (via Resend) whenever someone signs in. Fire-and-forget — doesn't block the sign-in flow.
 
 ### Deployment
 - **Live URL**: Hosted on Vercel (auto-deploys from `main` branch)
@@ -42,7 +43,8 @@ A design thinking tool that guides students through a synthesis process: **Obser
 - **Backend**: Firebase Firestore
 - **AI**: Claude API (Anthropic) — model: claude-sonnet-4-20250514
 - **Auth**: Firebase Auth with Google OAuth
-- **Hosting**: Vercel (with 7 environment variables configured)
+- **Email**: Resend (sign-in notifications to app owner)
+- **Hosting**: Vercel (with 9 environment variables configured)
 
 ## Getting Started
 
@@ -64,6 +66,10 @@ NEXT_PUBLIC_FIREBASE_APP_ID=your-app-id
 
 # Claude API
 ANTHROPIC_API_KEY=sk-ant-api...
+
+# Sign-in Notifications (Resend — https://resend.com)
+RESEND_API_KEY=re_xxxxxxxxxx
+NOTIFICATION_EMAIL=your-email@example.com
 ```
 
 ### Run Development Server
@@ -84,6 +90,7 @@ Open **Chrome** (not Safari) at http://localhost:3000/dashboard
 ```
 src/
 ├── app/
+│   ├── api/notify-signin/  # Sign-in email notification (Resend)
 │   ├── api/suggestions/    # Claude API endpoint
 │   ├── dashboard/          # Project list
 │   ├── project/[id]/       # Project workflow (1315 lines - main page)
