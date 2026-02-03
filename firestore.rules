@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Projects: users can only access their own projects
+    match /projects/{projectId} {
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+
+    // Observations: accessible if user owns the parent project
+    match /observations/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.userId == request.auth.uid;
+    }
+
+    // Harms: accessible if user owns the parent project
+    match /harms/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.userId == request.auth.uid;
+    }
+
+    // Criteria: accessible if user owns the parent project
+    match /criteria/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.userId == request.auth.uid;
+    }
+
+    // Strategies: accessible if user owns the parent project
+    match /strategies/{docId} {
+      allow read, write: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(resource.data.projectId)).data.userId == request.auth.uid;
+      allow create: if request.auth != null &&
+        get(/databases/$(database)/documents/projects/$(request.resource.data.projectId)).data.userId == request.auth.uid;
+    }
+  }
+}

@@ -10,22 +10,24 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { getProjects, createProject } from '@/lib/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/lib/auth-context';
 import type { Project } from '@/lib/types';
 
 function DashboardContent() {
   const router = useRouter();
+  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // Load projects on mount
+  // Load projects on mount (wait for user to be available)
   useEffect(() => {
     let isMounted = true;
 
     async function loadProjects() {
-      if (!db) {
+      if (!db || !user) {
         setLoading(false);
         return;
       }
@@ -39,7 +41,7 @@ function DashboardContent() {
       }, 8000);
 
       try {
-        const loadedProjects = await getProjects('dev-user');
+        const loadedProjects = await getProjects(user.uid);
         if (isMounted) {
           setProjects(loadedProjects);
         }
@@ -58,7 +60,7 @@ function DashboardContent() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user]);
 
   const handleCreateProject = async () => {
     if (!newProjectName.trim() || creating) return;
@@ -68,14 +70,14 @@ function DashboardContent() {
     try {
       if (db) {
         // Create in Firestore
-        const projectId = await createProject('dev-user', newProjectName.trim());
+        const projectId = await createProject(user!.uid, newProjectName.trim());
         // Navigate to the new project
         router.push(`/project/${projectId}`);
       } else {
         // Local fallback
         const newProject: Project = {
           id: crypto.randomUUID(),
-          userId: 'dev-user',
+          userId: user!.uid,
           name: newProjectName.trim(),
           tags: [],
           archived: false,

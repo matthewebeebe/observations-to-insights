@@ -10,12 +10,6 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ children }: ProtectedRouteProps) {
   const { user, loading, isConfigured, signInWithGoogle } = useAuth();
 
-  // DEV MODE: Skip auth for now - remove this line when auth is working
-  const skipAuth = true;
-  if (skipAuth) {
-    return <>{children}</>;
-  }
-
   // If Firebase isn't configured, allow access (dev mode without config)
   if (!isConfigured) {
     return <>{children}</>;
