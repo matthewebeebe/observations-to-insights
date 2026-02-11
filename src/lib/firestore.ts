@@ -130,8 +130,8 @@ export async function createObservation(projectId: string, content: string): Pro
     createdAt: serverTimestamp(),
   });
 
-  // Update project timestamp
-  await updateProject(projectId, {});
+  // Update project timestamp (non-blocking — don't fail the observation if this errors)
+  updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
 }
@@ -182,7 +182,7 @@ export async function createHarm(projectId: string, observationIds: string[], co
     createdAt: serverTimestamp(),
   });
 
-  await updateProject(projectId, {});
+  updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
 }
@@ -229,7 +229,7 @@ export async function createCriterion(projectId: string, harmId: string, content
     content,
   });
 
-  await updateProject(projectId, {});
+  updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
 }
@@ -288,7 +288,7 @@ export async function createStrategy(
 
   const docRef = await addDoc(collection(db, 'strategies'), data);
 
-  await updateProject(projectId, {});
+  updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
 }

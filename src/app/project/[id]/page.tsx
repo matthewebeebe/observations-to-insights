@@ -133,6 +133,14 @@ function ProjectContent() {
   const [loadingCriterionSuggestions, setLoadingCriterionSuggestions] = useState<Record<string, boolean>>({});
   const [loadingStrategySuggestions, setLoadingStrategySuggestions] = useState<Record<string, boolean>>({});
 
+  // Error message state
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const showError = useCallback((msg: string, error?: unknown) => {
+    const detail = error instanceof Error ? error.message : '';
+    setErrorMessage(detail ? `${msg} (${detail})` : msg);
+    setTimeout(() => setErrorMessage(null), 8000);
+  }, []);
+
   // Custom input state
   const [customHarmInputs, setCustomHarmInputs] = useState<Record<string, string>>({});
   const [customCriterionInputs, setCustomCriterionInputs] = useState<Record<string, string>>({});
@@ -273,6 +281,7 @@ function ProjectContent() {
         setObservations([...observations, observation]);
       } catch (error) {
         console.error('Error creating observation:', error);
+        showError('Failed to save observation', error);
         setNewObservation(content); // Restore on error
       }
     } else {
@@ -359,6 +368,7 @@ function ProjectContent() {
         setHarms([...harms, newHarm]);
       } catch (error) {
         console.error('Error creating harm:', error);
+        showError('Failed to save harm', error);
         setCustomHarmInputs(prev => ({ ...prev, [obsId]: content }));
       }
     } else {
@@ -462,6 +472,7 @@ function ProjectContent() {
         setCriteria([...criteria, newCriterion]);
       } catch (error) {
         console.error('Error creating criterion:', error);
+        showError('Failed to save criterion', error);
         setCustomCriterionInputs(prev => ({ ...prev, [harmId]: content }));
       }
     } else {
@@ -573,6 +584,7 @@ function ProjectContent() {
         setStrategies([...strategies, newStrategy]);
       } catch (error) {
         console.error('Error creating strategy:', error);
+        showError('Failed to save strategy', error);
         setCustomStrategyInputs(prev => ({ ...prev, [criterionId]: content }));
       }
     } else {
@@ -778,6 +790,18 @@ function ProjectContent() {
 
         {/* Main Content */}
         <main className="flex-1 p-6 max-w-4xl">
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
+              <span>{errorMessage}</span>
+              <button onClick={() => setErrorMessage(null)} className="text-red-500 hover:text-red-700 ml-4 shrink-0">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+          )}
+
           {/* Overview View */}
           {activeStep === 'overview' && (
             <div className="space-y-6">
