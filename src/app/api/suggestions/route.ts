@@ -45,6 +45,9 @@ export async function POST(request: NextRequest) {
       if (context.observations) {
         filledPrompt = filledPrompt.replace(/\{\{observations\}\}/g, context.observations);
       }
+      if (context.observation) {
+        filledPrompt = filledPrompt.replace(/\{\{observation\}\}/g, context.observation);
+      }
       if (context.harm) {
         filledPrompt = filledPrompt.replace(/\{\{harm\}\}/g, context.harm);
       }

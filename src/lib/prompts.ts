@@ -5,6 +5,8 @@ export interface Prompts {
   harms: string;
   criteria: string;
   strategies: string;
+  observationCoaching: string;
+  insightTitle: string;
 }
 
 export const defaultPrompts: Prompts = {
@@ -66,6 +68,31 @@ Context (the harm this addresses):
 {{harm}}
 
 Respond with just the list of HMW questions, one per line, no numbering or bullets.`,
+
+  observationCoaching: `You are coaching a design thinking student on writing good observations. Good observations are objective, factual accounts of what was seen or heard during research — no judgments, interpretations, or assumptions.
+
+The student just wrote this observation:
+{{observation}}
+
+If the observation contains judgment, interpretation, assumption, or opinion, give a brief, friendly coaching suggestion (1-2 sentences) on how to make it more factual and observational. Be specific about what to change.
+
+If the observation is already a good factual observation, respond with exactly the word: GOOD
+
+Examples of bad observations and coaching:
+- "The user was confused by the menu" → "This interprets the user's mental state. What did you actually see? Maybe: 'The user paused for 10 seconds and clicked three different menu items before finding what they needed.'"
+- "The kitchen was poorly organized" → "This is a judgment. What specifically did you observe? For example: 'Spices were stored in three different cabinets and the user opened all three while cooking.'"
+
+Respond with ONLY the coaching suggestion or the word GOOD. No preamble.`,
+
+  insightTitle: `Generate a short, punchy, memorable title (2-4 words) for the following design insight. The title should be catchy and capture the essence of the problem space.
+
+Observation: {{observation}}
+Harm: {{harm}}
+Criterion: {{criterion}}
+
+Examples of good titles: "Kitchen Chaos", "Lost in Labels", "Trust Gap", "Silent Struggle", "Invisible Burden"
+
+Respond with ONLY the title, nothing else.`,
 };
 
 // Local storage key for custom prompts

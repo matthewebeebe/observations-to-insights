@@ -5,10 +5,9 @@ import { useParams } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
-import { WORKFLOW_STEPS } from '@/lib/types';
 import type { Observation, Harm, Criterion, Strategy } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import {
@@ -16,6 +15,8 @@ import {
   updateProject,
   getObservations,
   createObservation,
+  updateObservation,
+  updateObservationOrder,
   deleteObservation,
   getHarms,
   createHarm,
@@ -28,6 +29,17 @@ import {
   deleteStrategy,
 } from '@/lib/firestore';
 import { getPrompts } from '@/lib/prompts';
+import { DndContext, closestCenter, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
+import type { DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, useSortable, rectSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 // Types for AI suggestions
 interface HarmSuggestion {
@@ -49,10 +61,16 @@ interface StrategySuggestion {
   selected: boolean;
 }
 
+// Detail panel item type
+interface DetailItem {
+  type: 'observation' | 'harm' | 'criterion';
+  id: string;
+}
+
 // API call to generate suggestions
 async function fetchSuggestions(
-  type: 'harms' | 'criteria' | 'strategies',
-  context: { observations?: string; harm?: string; criterion?: string }
+  type: 'harms' | 'criteria' | 'strategies' | 'observationCoaching' | 'insightTitle',
+  context: { observations?: string; observation?: string; harm?: string; criterion?: string }
 ): Promise<string[]> {
   const prompts = getPrompts();
   const prompt = prompts[type];
@@ -71,6 +89,116 @@ async function fetchSuggestions(
   return data.suggestions;
 }
 
+// X icon component
+function XIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 6 6 18" /><path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
+// Expand icon component
+function ExpandIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 3h6v6" /><path d="M9 21H3v-6" /><path d="M21 3l-7 7" /><path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
+// Back arrow icon
+function BackIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+// Plus icon
+function PlusIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h14" /><path d="M12 5v14" />
+    </svg>
+  );
+}
+
+// Fork/branch icon
+function ForkIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" />
+      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" /><path d="M12 12v3" />
+    </svg>
+  );
+}
+
+// Column header with colored left border
+const columnColors = {
+  blue: { border: 'border-l-blue-400', text: 'text-blue-900' },
+  orange: { border: 'border-l-orange-400', text: 'text-orange-900' },
+  green: { border: 'border-l-green-400', text: 'text-green-900' },
+  purple: { border: 'border-l-purple-400', text: 'text-purple-900' },
+};
+
+function ColumnHeader({ label, color }: { label: string; color: 'blue' | 'orange' | 'green' | 'purple' }) {
+  return (
+    <div className={`border-l-4 ${columnColors[color].border} pl-3 py-1`}>
+      <h3 className={`text-sm font-medium ${columnColors[color].text}`}>{label}</h3>
+    </div>
+  );
+}
+
+// Content block with colored background and optional delete
+function ContentBlock({ content, color, onDelete, suffix }: {
+  content: string;
+  color: 'blue' | 'orange' | 'green' | 'purple';
+  onDelete?: () => void;
+  suffix?: React.ReactNode;
+}) {
+  const bgColors = {
+    blue: 'bg-blue-50 border-blue-100',
+    orange: 'bg-orange-50 border-orange-100',
+    green: 'bg-green-50 border-green-100',
+    purple: 'bg-purple-50 border-purple-100',
+  };
+  const deleteColors = {
+    blue: 'text-blue-400 hover:text-blue-600',
+    orange: 'text-orange-400 hover:text-orange-600',
+    green: 'text-green-400 hover:text-green-600',
+    purple: 'text-purple-400 hover:text-purple-600',
+  };
+  return (
+    <div className={`px-3 py-2 rounded-md border ${bgColors[color]} group/block`}>
+      <div className="flex items-start justify-between gap-2">
+        <p className={`text-sm ${columnColors[color].text}`}>
+          {content}
+          {suffix}
+        </p>
+        {onDelete && (
+          <button
+            onClick={onDelete}
+            className={`opacity-0 group-hover/block:opacity-100 transition-opacity ${deleteColors[color]} shrink-0`}
+          >
+            <XIcon size={12} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Coaching/suggestion wrapper
+function CoachingArea({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="bg-amber-50/60 rounded-md px-3 py-2 text-sm">
+      {children}
+    </div>
+  );
+}
+
 function ProjectContent() {
   const params = useParams();
   const projectId = params.id as string;
@@ -79,7 +207,6 @@ function ProjectContent() {
   const [projectName, setProjectName] = useState('Untitled Project');
   const [isEditingName, setIsEditingName] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
-  const [activeStep, setActiveStep] = useState<'overview' | 'observations' | 'harms' | 'criteria' | 'strategies'>('overview');
   const [newObservation, setNewObservation] = useState('');
 
   // Core data
@@ -87,6 +214,14 @@ function ProjectContent() {
   const [harms, setHarms] = useState<Harm[]>([]);
   const [criteria, setCriteria] = useState<Criterion[]>([]);
   const [strategies, setStrategies] = useState<Strategy[]>([]);
+
+  // Detail panel state
+  const [detailItem, setDetailItem] = useState<DetailItem | null>(null);
+
+  // Observation coaching state
+  const [coachingText, setCoachingText] = useState<string | null>(null);
+  const [loadingCoaching, setLoadingCoaching] = useState(false);
+  const coachingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Load project data on mount
   useEffect(() => {
@@ -146,12 +281,53 @@ function ProjectContent() {
   const [customCriterionInputs, setCustomCriterionInputs] = useState<Record<string, string>>({});
   const [customStrategyInputs, setCustomStrategyInputs] = useState<Record<string, string>>({});
 
-  // Track which input is focused (to show suggestions only for that item)
-  const [focusedInputId, setFocusedInputId] = useState<string | null>(null);
+  // (focusedInputId removed — 4-column layout shows all suggestion panels simultaneously)
 
-  // Fetch harm suggestions on focus (lazy loading instead of eager)
+  // Inline add state: tracks which card has an inline input open and what type
+  // e.g. { parentId: 'obs-123', type: 'harm' } or { parentId: 'harm-456', type: 'criterion' }
+  const [inlineAdd, setInlineAdd] = useState<{ parentId: string; type: 'harm' | 'criterion' | 'strategy' } | null>(null);
+
+  // Observation coaching — debounced AI feedback
+  const handleObservationChange = useCallback((text: string) => {
+    setNewObservation(text);
+    setCoachingText(null);
+
+    if (coachingTimerRef.current) {
+      clearTimeout(coachingTimerRef.current);
+    }
+
+    if (!text.trim() || text.trim().length < 10) {
+      setLoadingCoaching(false);
+      return;
+    }
+
+    coachingTimerRef.current = setTimeout(async () => {
+      setLoadingCoaching(true);
+      try {
+        const results = await fetchSuggestions('observationCoaching', { observation: text.trim() });
+        const coaching = results[0] || '';
+        if (coaching && coaching !== 'GOOD') {
+          setCoachingText(coaching);
+        } else {
+          setCoachingText(null);
+        }
+      } catch (error) {
+        console.error('Error fetching coaching:', error);
+      } finally {
+        setLoadingCoaching(false);
+      }
+    }, 2000);
+  }, []);
+
+  // Cleanup coaching timer
+  useEffect(() => {
+    return () => {
+      if (coachingTimerRef.current) clearTimeout(coachingTimerRef.current);
+    };
+  }, []);
+
+  // Fetch harm suggestions on focus (lazy loading)
   const handleHarmInputFocus = useCallback(async (obsId: string) => {
-    setFocusedInputId(obsId);
     if (!harmSuggestions[obsId] && !loadingHarmSuggestions[obsId]) {
       const obs = observations.find(o => o.id === obsId);
       if (!obs) return;
@@ -177,7 +353,6 @@ function ProjectContent() {
 
   // Fetch criterion suggestions on focus
   const handleCriterionInputFocus = useCallback(async (harmId: string) => {
-    setFocusedInputId(harmId);
     if (!criterionSuggestions[harmId] && !loadingCriterionSuggestions[harmId]) {
       const harm = harms.find(h => h.id === harmId);
       if (!harm) return;
@@ -210,7 +385,6 @@ function ProjectContent() {
 
   // Fetch strategy suggestions on focus
   const handleStrategyInputFocus = useCallback(async (criterionId: string) => {
-    setFocusedInputId(criterionId);
     if (!strategySuggestions[criterionId] && !loadingStrategySuggestions[criterionId]) {
       const crit = criteria.find(c => c.id === criterionId);
       if (!crit) return;
@@ -239,35 +413,20 @@ function ProjectContent() {
     }
   }, [strategySuggestions, loadingStrategySuggestions, criteria, harms]);
 
-  // Navigate from overview to a specific tab with an input focused
-  const pendingFocusId = useRef<string | null>(null);
-
-  const navigateToInput = useCallback((step: 'harms' | 'criteria' | 'strategies', inputId: string) => {
-    pendingFocusId.current = inputId;
-    setActiveStep(step);
-  }, []);
-
-  // After tab switch, focus the target input element
+  // Auto-load harm suggestions when detail panel opens
   useEffect(() => {
-    if (pendingFocusId.current) {
-      const id = pendingFocusId.current;
-      pendingFocusId.current = null;
-      // Small delay to let the new tab render
-      const timer = setTimeout(() => {
-        const input = document.querySelector(`[data-input-id="${id}"]`) as HTMLInputElement;
-        if (input) {
-          input.focus();
-          input.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 150);
-      return () => clearTimeout(timer);
+    if (detailItem) {
+      handleHarmInputFocus(detailItem.id);
     }
-  }, [activeStep]);
+  }, [detailItem, handleHarmInputFocus]);
 
-  const handleAddObservation = async () => {
-    if (!newObservation.trim()) return;
+  // ============ CRUD OPERATIONS ============
+
+  const handleAddObservation = async (): Promise<string | null> => {
+    if (!newObservation.trim()) return null;
     const content = newObservation.trim();
     setNewObservation('');
+    setCoachingText(null);
 
     if (db) {
       try {
@@ -279,21 +438,119 @@ function ProjectContent() {
           createdAt: new Date(),
         };
         setObservations([...observations, observation]);
+        return id;
       } catch (error) {
         console.error('Error creating observation:', error);
         showError('Failed to save observation', error);
-        setNewObservation(content); // Restore on error
+        setNewObservation(content);
+        return null;
       }
     } else {
-      // Local fallback
+      const id = crypto.randomUUID();
       const observation: Observation = {
-        id: crypto.randomUUID(),
+        id,
         projectId,
         content,
         createdAt: new Date(),
       };
       setObservations([...observations, observation]);
+      return id;
     }
+  };
+
+  // Branch: duplicate an observation's content into a new card, inserted after the source
+  const handleAddObservationFromBranch = async (sourceObsId: string, content: string): Promise<string | null> => {
+    const idx = observations.findIndex(o => o.id === sourceObsId);
+    // Calculate an order value between source and next (or source + 1 if last)
+    const sourceOrder = observations[idx]?.order ?? idx;
+    const nextOrder = idx + 1 < observations.length
+      ? (observations[idx + 1].order ?? idx + 1)
+      : sourceOrder + 1;
+    const branchOrder = (sourceOrder + nextOrder) / 2;
+
+    const insertAfter = (obs: Observation) => {
+      const next = [...observations];
+      next.splice(idx + 1, 0, obs);
+      setObservations(next);
+    };
+
+    if (db) {
+      try {
+        const id = await createObservation(projectId, content, undefined, branchOrder);
+        const observation: Observation = {
+          id,
+          projectId,
+          content,
+          order: branchOrder,
+          createdAt: new Date(),
+        };
+        insertAfter(observation);
+        return id;
+      } catch (error) {
+        console.error('Error branching observation:', error);
+        showError('Failed to branch observation', error);
+        return null;
+      }
+    } else {
+      const id = crypto.randomUUID();
+      const observation: Observation = {
+        id,
+        projectId,
+        content,
+        order: branchOrder,
+        createdAt: new Date(),
+      };
+      insertAfter(observation);
+      return id;
+    }
+  };
+
+  const handleDeleteObservation = async (obsId: string) => {
+    if (db) {
+      try {
+        await deleteObservation(obsId);
+      } catch (error) {
+        console.error('Error deleting observation:', error);
+        return;
+      }
+    }
+    setObservations(observations.filter(o => o.id !== obsId));
+  };
+
+  const handleDeleteHarm = async (harmId: string) => {
+    if (db) {
+      try {
+        await deleteHarm(harmId);
+      } catch (error) {
+        console.error('Error deleting harm:', error);
+        return;
+      }
+    }
+    setHarms(harms.filter(h => h.id !== harmId));
+  };
+
+  const handleDeleteCriterion = async (criterionId: string) => {
+    if (db) {
+      try {
+        await deleteCriterion(criterionId);
+      } catch (error) {
+        console.error('Error deleting criterion:', error);
+        return;
+      }
+    }
+    setCriteria(criteria.filter(c => c.id !== criterionId));
+  };
+
+  const handleDeleteStrategy = async (strategyId: string) => {
+    if (db) {
+      try {
+        await deleteStrategy(strategyId);
+      } catch (error) {
+        console.error('Error deleting strategy:', error);
+        return;
+      }
+    }
+    setStrategies(strategies.filter(s => s.id !== strategyId));
   };
 
   const toggleHarmSuggestion = async (obsId: string, suggestionId: string) => {
@@ -302,14 +559,9 @@ function ProjectContent() {
     if (!suggestion) return;
 
     if (suggestion.selected) {
-      // Deselect - remove from harms
       const harmToRemove = harms.find(h => h.content === suggestion.content && h.observationIds.includes(obsId));
       if (harmToRemove && db) {
-        try {
-          await deleteHarm(harmToRemove.id);
-        } catch (error) {
-          console.error('Error deleting harm:', error);
-        }
+        try { await deleteHarm(harmToRemove.id); } catch (error) { console.error('Error deleting harm:', error); }
       }
       setHarms(harms.filter(h => !(h.content === suggestion.content && h.observationIds.includes(obsId))));
       setHarmSuggestions(prev => ({
@@ -317,31 +569,13 @@ function ProjectContent() {
         [obsId]: prev[obsId].map(s => s.id === suggestionId ? { ...s, selected: false } : s)
       }));
     } else {
-      // Select - add to harms
       if (db) {
         try {
           const id = await createHarm(projectId, [obsId], suggestion.content);
-          const newHarm: Harm = {
-            id,
-            projectId,
-            observationIds: [obsId],
-            content: suggestion.content,
-            createdAt: new Date(),
-          };
-          setHarms([...harms, newHarm]);
-        } catch (error) {
-          console.error('Error creating harm:', error);
-          return;
-        }
+          setHarms([...harms, { id, projectId, observationIds: [obsId], content: suggestion.content, createdAt: new Date() }]);
+        } catch (error) { console.error('Error creating harm:', error); return; }
       } else {
-        const newHarm: Harm = {
-          id: crypto.randomUUID(),
-          projectId,
-          observationIds: [obsId],
-          content: suggestion.content,
-          createdAt: new Date(),
-        };
-        setHarms([...harms, newHarm]);
+        setHarms([...harms, { id: crypto.randomUUID(), projectId, observationIds: [obsId], content: suggestion.content, createdAt: new Date() }]);
       }
       setHarmSuggestions(prev => ({
         ...prev,
@@ -358,52 +592,29 @@ function ProjectContent() {
     if (db) {
       try {
         const id = await createHarm(projectId, [obsId], content);
-        const newHarm: Harm = {
-          id,
-          projectId,
-          observationIds: [obsId],
-          content,
-          createdAt: new Date(),
-        };
-        setHarms([...harms, newHarm]);
+        setHarms([...harms, { id, projectId, observationIds: [obsId], content, createdAt: new Date() }]);
       } catch (error) {
         console.error('Error creating harm:', error);
         showError('Failed to save harm', error);
         setCustomHarmInputs(prev => ({ ...prev, [obsId]: content }));
       }
     } else {
-      const newHarm: Harm = {
-        id: crypto.randomUUID(),
-        projectId,
-        observationIds: [obsId],
-        content,
-        createdAt: new Date(),
-      };
-      setHarms([...harms, newHarm]);
+      setHarms([...harms, { id: crypto.randomUUID(), projectId, observationIds: [obsId], content, createdAt: new Date() }]);
     }
   };
 
   const generateMoreHarmSuggestions = async (obsId: string) => {
     const obs = observations.find(o => o.id === obsId);
     if (!obs || loadingHarmSuggestions[obsId]) return;
-
     setLoadingHarmSuggestions(prev => ({ ...prev, [obsId]: true }));
     try {
       const suggestions = await fetchSuggestions('harms', { observations: obs.content });
-      const newSuggestions = suggestions.map(content => ({
-        id: crypto.randomUUID(),
-        content,
-        selected: false,
-      }));
       setHarmSuggestions(prev => ({
         ...prev,
-        [obsId]: [...(prev[obsId] || []), ...newSuggestions]
+        [obsId]: [...(prev[obsId] || []), ...suggestions.map(content => ({ id: crypto.randomUUID(), content, selected: false }))]
       }));
-    } catch (error) {
-      console.error('Error generating more harm suggestions:', error);
-    } finally {
-      setLoadingHarmSuggestions(prev => ({ ...prev, [obsId]: false }));
-    }
+    } catch (error) { console.error('Error generating more harm suggestions:', error); }
+    finally { setLoadingHarmSuggestions(prev => ({ ...prev, [obsId]: false })); }
   };
 
   const toggleCriterionSuggestion = async (harmId: string, suggestionId: string) => {
@@ -414,11 +625,7 @@ function ProjectContent() {
     if (suggestion.selected) {
       const critToRemove = criteria.find(c => c.content === suggestion.content && c.harmId === harmId);
       if (critToRemove && db) {
-        try {
-          await deleteCriterion(critToRemove.id);
-        } catch (error) {
-          console.error('Error deleting criterion:', error);
-        }
+        try { await deleteCriterion(critToRemove.id); } catch (error) { console.error('Error deleting criterion:', error); }
       }
       setCriteria(criteria.filter(c => !(c.content === suggestion.content && c.harmId === harmId)));
       setCriterionSuggestions(prev => ({
@@ -429,24 +636,12 @@ function ProjectContent() {
       if (db) {
         try {
           const id = await createCriterion(projectId, harmId, suggestion.content);
-          const newCriterion: Criterion = {
-            id,
-            projectId,
-            harmId,
-            content: suggestion.content,
-          };
-          setCriteria([...criteria, newCriterion]);
-        } catch (error) {
-          console.error('Error creating criterion:', error);
-          return;
-        }
+          setCriteria([...criteria, { id, projectId, harmId, content: suggestion.content }]);
+          // Auto-generate title when first criterion is added
+          maybeGenerateTitle(harmId, suggestion.content);
+        } catch (error) { console.error('Error creating criterion:', error); return; }
       } else {
-        const newCriterion: Criterion = {
-          id: crypto.randomUUID(),
-          harmId,
-          content: suggestion.content,
-        };
-        setCriteria([...criteria, newCriterion]);
+        setCriteria([...criteria, { id: crypto.randomUUID(), harmId, content: suggestion.content }]);
       }
       setCriterionSuggestions(prev => ({
         ...prev,
@@ -463,56 +658,31 @@ function ProjectContent() {
     if (db) {
       try {
         const id = await createCriterion(projectId, harmId, content);
-        const newCriterion: Criterion = {
-          id,
-          projectId,
-          harmId,
-          content,
-        };
-        setCriteria([...criteria, newCriterion]);
+        setCriteria([...criteria, { id, projectId, harmId, content }]);
+        maybeGenerateTitle(harmId, content);
       } catch (error) {
         console.error('Error creating criterion:', error);
         showError('Failed to save criterion', error);
         setCustomCriterionInputs(prev => ({ ...prev, [harmId]: content }));
       }
     } else {
-      const newCriterion: Criterion = {
-        id: crypto.randomUUID(),
-        harmId,
-        content,
-      };
-      setCriteria([...criteria, newCriterion]);
+      setCriteria([...criteria, { id: crypto.randomUUID(), harmId, content }]);
     }
   };
 
   const generateMoreCriterionSuggestions = async (harmId: string) => {
     const harm = harms.find(h => h.id === harmId);
     if (!harm || loadingCriterionSuggestions[harmId]) return;
-
     setLoadingCriterionSuggestions(prev => ({ ...prev, [harmId]: true }));
     try {
-      const obsContent = observations
-        .filter(o => harm.observationIds.includes(o.id))
-        .map(o => o.content)
-        .join('\n');
-      const suggestions = await fetchSuggestions('criteria', {
-        harm: harm.content,
-        observations: obsContent,
-      });
-      const newSuggestions = suggestions.map(content => ({
-        id: crypto.randomUUID(),
-        content,
-        selected: false,
-      }));
+      const obsContent = observations.filter(o => harm.observationIds.includes(o.id)).map(o => o.content).join('\n');
+      const suggestions = await fetchSuggestions('criteria', { harm: harm.content, observations: obsContent });
       setCriterionSuggestions(prev => ({
         ...prev,
-        [harmId]: [...(prev[harmId] || []), ...newSuggestions]
+        [harmId]: [...(prev[harmId] || []), ...suggestions.map(content => ({ id: crypto.randomUUID(), content, selected: false }))]
       }));
-    } catch (error) {
-      console.error('Error generating more criterion suggestions:', error);
-    } finally {
-      setLoadingCriterionSuggestions(prev => ({ ...prev, [harmId]: false }));
-    }
+    } catch (error) { console.error('Error generating more criterion suggestions:', error); }
+    finally { setLoadingCriterionSuggestions(prev => ({ ...prev, [harmId]: false })); }
   };
 
   const toggleStrategySuggestion = async (criterionId: string, suggestionId: string) => {
@@ -523,11 +693,7 @@ function ProjectContent() {
     if (suggestion.selected) {
       const stratToRemove = strategies.find(s => s.content === suggestion.content && s.criterionId === criterionId);
       if (stratToRemove && db) {
-        try {
-          await deleteStrategy(stratToRemove.id);
-        } catch (error) {
-          console.error('Error deleting strategy:', error);
-        }
+        try { await deleteStrategy(stratToRemove.id); } catch (error) { console.error('Error deleting strategy:', error); }
       }
       setStrategies(strategies.filter(s => !(s.content === suggestion.content && s.criterionId === criterionId)));
       setStrategySuggestions(prev => ({
@@ -538,26 +704,10 @@ function ProjectContent() {
       if (db) {
         try {
           const id = await createStrategy(projectId, criterionId, suggestion.content, suggestion.type);
-          const newStrategy: Strategy = {
-            id,
-            projectId,
-            criterionId,
-            content: suggestion.content,
-            strategyType: suggestion.type,
-          };
-          setStrategies([...strategies, newStrategy]);
-        } catch (error) {
-          console.error('Error creating strategy:', error);
-          return;
-        }
+          setStrategies([...strategies, { id, projectId, criterionId, content: suggestion.content, strategyType: suggestion.type }]);
+        } catch (error) { console.error('Error creating strategy:', error); return; }
       } else {
-        const newStrategy: Strategy = {
-          id: crypto.randomUUID(),
-          criterionId,
-          content: suggestion.content,
-          strategyType: suggestion.type,
-        };
-        setStrategies([...strategies, newStrategy]);
+        setStrategies([...strategies, { id: crypto.randomUUID(), criterionId, content: suggestion.content, strategyType: suggestion.type }]);
       }
       setStrategySuggestions(prev => ({
         ...prev,
@@ -575,160 +725,223 @@ function ProjectContent() {
     if (db) {
       try {
         const id = await createStrategy(projectId, criterionId, finalContent);
-        const newStrategy: Strategy = {
-          id,
-          projectId,
-          criterionId,
-          content: finalContent,
-        };
-        setStrategies([...strategies, newStrategy]);
+        setStrategies([...strategies, { id, projectId, criterionId, content: finalContent }]);
       } catch (error) {
         console.error('Error creating strategy:', error);
         showError('Failed to save strategy', error);
         setCustomStrategyInputs(prev => ({ ...prev, [criterionId]: content }));
       }
     } else {
-      const newStrategy: Strategy = {
-        id: crypto.randomUUID(),
-        criterionId,
-        content: finalContent,
-      };
-      setStrategies([...strategies, newStrategy]);
+      setStrategies([...strategies, { id: crypto.randomUUID(), criterionId, content: finalContent }]);
     }
   };
 
   const generateMoreStrategySuggestions = async (criterionId: string) => {
     const crit = criteria.find(c => c.id === criterionId);
     if (!crit || loadingStrategySuggestions[criterionId]) return;
-
     setLoadingStrategySuggestions(prev => ({ ...prev, [criterionId]: true }));
     try {
       const harm = harms.find(h => h.id === crit.harmId);
-      const suggestions = await fetchSuggestions('strategies', {
-        criterion: crit.content,
-        harm: harm?.content || '',
-      });
-      const newSuggestions = suggestions.map(content => ({
-        id: crypto.randomUUID(),
-        content,
-        type: 'confront' as const,
-        selected: false,
-      }));
+      const suggestions = await fetchSuggestions('strategies', { criterion: crit.content, harm: harm?.content || '' });
       setStrategySuggestions(prev => ({
         ...prev,
-        [criterionId]: [...(prev[criterionId] || []), ...newSuggestions]
+        [criterionId]: [...(prev[criterionId] || []), ...suggestions.map(content => ({ id: crypto.randomUUID(), content, type: 'confront' as const, selected: false }))]
       }));
+    } catch (error) { console.error('Error generating more strategy suggestions:', error); }
+    finally { setLoadingStrategySuggestions(prev => ({ ...prev, [criterionId]: false })); }
+  };
+
+  // ============ TITLE GENERATION ============
+
+  const maybeGenerateTitle = useCallback(async (harmId: string, criterionContent: string) => {
+    // Find the observation that owns this harm
+    const harm = harms.find(h => h.id === harmId);
+    if (!harm) return;
+    const obs = observations.find(o => harm.observationIds.includes(o.id));
+    if (!obs || obs.title) return; // Already has a title
+
+    try {
+      const results = await fetchSuggestions('insightTitle', {
+        observation: obs.content,
+        harm: harm.content,
+        criterion: criterionContent,
+      });
+      const title = results[0]?.trim();
+      if (title) {
+        // Update local state
+        setObservations(prev => prev.map(o => o.id === obs.id ? { ...o, title } : o));
+        // Persist to Firestore
+        if (db) {
+          updateObservation(obs.id, { title }).catch(e => console.error('Failed to save title:', e));
+        }
+      }
     } catch (error) {
-      console.error('Error generating more strategy suggestions:', error);
-    } finally {
-      setLoadingStrategySuggestions(prev => ({ ...prev, [criterionId]: false }));
+      console.error('Error generating title:', error);
     }
-  };
+  }, [harms, observations, projectId]);
 
-  // Get harms for a specific observation
-  const getHarmsForObservation = (obsId: string) => {
-    return harms.filter(h => h.observationIds.includes(obsId));
-  };
+  // ============ HELPERS ============
 
-  // Get criteria for a specific harm
-  const getCriteriaForHarm = (harmId: string) => {
-    return criteria.filter(c => c.harmId === harmId);
-  };
+  const getHarmsForObservation = (obsId: string) => harms.filter(h => h.observationIds.includes(obsId));
+  const getCriteriaForHarm = (harmId: string) => criteria.filter(c => c.harmId === harmId);
+  const getStrategiesForCriterion = (criterionId: string) => strategies.filter(s => s.criterionId === criterionId);
+  const getObservationForHarm = (harm: Harm) => observations.find(o => harm.observationIds.includes(o.id));
 
-  // Get strategies for a specific criterion
-  const getStrategiesForCriterion = (criterionId: string) => {
-    return strategies.filter(s => s.criterionId === criterionId);
-  };
-
-  // Get the observation for a harm
-  const getObservationForHarm = (harm: Harm) => {
-    return observations.find(o => harm.observationIds.includes(o.id));
-  };
-
-  // Get the harm for a criterion
-  const getHarmForCriterion = (criterion: Criterion) => {
-    return harms.find(h => h.id === criterion.harmId);
-  };
-
-  // Save project name
   const handleSaveProjectName = async () => {
     setIsEditingName(false);
     if (db) {
-      try {
-        await updateProject(projectId, { name: projectName });
-      } catch (error) {
-        console.error('Error updating project name:', error);
-      }
+      try { await updateProject(projectId, { name: projectName }); }
+      catch (error) { console.error('Error updating project name:', error); }
     }
   };
 
-  // Toggle archive
   const handleToggleArchive = async () => {
     const newArchived = !isArchived;
     setIsArchived(newArchived);
     if (db) {
-      try {
-        await updateProject(projectId, { archived: newArchived });
-      } catch (error) {
-        console.error('Error updating archive status:', error);
-        setIsArchived(!newArchived); // Revert on error
-      }
+      try { await updateProject(projectId, { archived: newArchived }); }
+      catch (error) { console.error('Error updating archive status:', error); setIsArchived(!newArchived); }
     }
   };
 
-  // Delete observation
-  const handleDeleteObservation = async (obsId: string) => {
+  const handleSaveObservationTitle = async (obsId: string, title: string) => {
+    setObservations(prev => prev.map(o => o.id === obsId ? { ...o, title } : o));
     if (db) {
-      try {
-        await deleteObservation(obsId);
-      } catch (error) {
-        console.error('Error deleting observation:', error);
-        return;
-      }
+      updateObservation(obsId, { title }).catch(e => console.error('Failed to save title:', e));
     }
-    setObservations(observations.filter(o => o.id !== obsId));
   };
 
-  // Export functionality
-  const handleExport = () => {
-    let exportText = `# ${projectName}\n\n`;
+  const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
 
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopyFeedback(label);
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  const handleCopyAll = () => {
+    let text = `# ${projectName}\n\n`;
     if (observations.length > 0) {
-      exportText += `## Observations\n`;
+      text += `## Observations\n`;
       observations.forEach((obs, i) => {
-        exportText += `${i + 1}. ${obs.content}\n`;
+        text += `${i + 1}. ${obs.title ? `**${obs.title}**: ` : ''}${obs.content}\n`;
       });
-      exportText += `\n`;
+      text += `\n`;
     }
-
     if (harms.length > 0) {
-      exportText += `## Harms\n`;
+      text += `## Harms\n`;
       harms.forEach((harm, i) => {
         const obs = getObservationForHarm(harm);
-        exportText += `${i + 1}. ${harm.content}\n`;
-        if (obs) exportText += `   ← From: "${obs.content.slice(0, 50)}..."\n`;
+        text += `${i + 1}. ${harm.content}\n`;
+        if (obs) text += `   From: "${obs.content.slice(0, 50)}..."\n`;
       });
-      exportText += `\n`;
+      text += `\n`;
     }
-
     if (criteria.length > 0) {
-      exportText += `## Criteria\n`;
-      criteria.forEach((crit, i) => {
-        exportText += `${i + 1}. ${crit.content}\n`;
-      });
-      exportText += `\n`;
+      text += `## Criteria\n`;
+      criteria.forEach((crit, i) => { text += `${i + 1}. ${crit.content}\n`; });
+      text += `\n`;
     }
-
     if (strategies.length > 0) {
-      exportText += `## Strategies (How Might We)\n`;
+      text += `## Strategies (How Might We)\n`;
       strategies.forEach((strat, i) => {
-        exportText += `${i + 1}. ${strat.content}${strat.strategyType ? ` (${strat.strategyType})` : ''}\n`;
+        text += `${i + 1}. ${strat.content}${strat.strategyType ? ` (${strat.strategyType})` : ''}\n`;
       });
     }
-
-    navigator.clipboard.writeText(exportText);
-    alert('Copied to clipboard!');
+    copyToClipboard(text, 'Copied all');
   };
+
+  const handleCopyMatrix = () => {
+    const rows: string[][] = [['Observation', 'Harm', 'Solution Criteria', 'Strategy']];
+    for (const obs of observations) {
+      const obsHarms = getHarmsForObservation(obs.id);
+      if (obsHarms.length === 0) {
+        rows.push([obs.content, '', '', '']);
+        continue;
+      }
+      for (const harm of obsHarms) {
+        const harmCriteria = getCriteriaForHarm(harm.id);
+        if (harmCriteria.length === 0) {
+          rows.push([obs.content, harm.content, '', '']);
+          continue;
+        }
+        for (const crit of harmCriteria) {
+          const critStrategies = getStrategiesForCriterion(crit.id);
+          if (critStrategies.length === 0) {
+            rows.push([obs.content, harm.content, crit.content, '']);
+            continue;
+          }
+          for (const strat of critStrategies) {
+            rows.push([obs.content, harm.content, crit.content, strat.content]);
+          }
+        }
+      }
+    }
+
+    const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const headerRow = rows[0].map(c => `<th style="border:1px solid #ccc;padding:6px;background:#f5f5f5;font-weight:bold;text-align:left">${escape(c)}</th>`).join('');
+    const bodyRows = rows.slice(1).map(row =>
+      '<tr>' + row.map(c => `<td style="border:1px solid #ccc;padding:6px;vertical-align:top">${escape(c)}</td>`).join('') + '</tr>'
+    ).join('');
+    const html = `<table style="border-collapse:collapse"><thead><tr>${headerRow}</tr></thead><tbody>${bodyRows}</tbody></table>`;
+    const plain = rows.map(row => row.join('\t')).join('\n');
+
+    navigator.clipboard.write([
+      new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+      })
+    ]);
+    setCopyFeedback('Copied matrix');
+    setTimeout(() => setCopyFeedback(null), 2000);
+  };
+
+  const handleCopyType = (type: 'observations' | 'harms' | 'criteria' | 'strategies') => {
+    let items: string[] = [];
+    switch (type) {
+      case 'observations':
+        items = observations.map(o => o.title ? `${o.title}: ${o.content}` : o.content);
+        break;
+      case 'harms':
+        items = harms.map(h => h.content);
+        break;
+      case 'criteria':
+        items = criteria.map(c => c.content);
+        break;
+      case 'strategies':
+        items = strategies.map(s => s.content);
+        break;
+    }
+    copyToClipboard(items.join('\n'), `Copied ${type}`);
+  };
+
+  // ============ DRAG AND DROP ============
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = observations.findIndex(o => o.id === active.id);
+    const newIndex = observations.findIndex(o => o.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(observations, oldIndex, newIndex);
+    setObservations(reordered);
+
+    // Persist new order to Firestore (fire-and-forget)
+    if (db) {
+      const updates = reordered.map((obs, i) => ({ id: obs.id, order: i }));
+      updateObservationOrder(updates).catch(e =>
+        console.error('Failed to persist observation order:', e)
+      );
+    }
+  };
+
+  // ============ RENDER ============
 
   if (loading) {
     return (
@@ -741,647 +954,740 @@ function ProjectContent() {
     );
   }
 
+  // Look up the observation for the detail panel
+  const detailObs = detailItem ? observations.find(o => o.id === detailItem.id) : null;
+
   return (
     <div className="min-h-screen bg-background">
       <Header projectName={projectName} />
 
-      <div className="flex">
-        {/* Workflow Sidebar */}
-        <aside className="w-64 border-r border-border min-h-[calc(100vh-3.5rem)] p-4 hidden md:block">
-          <nav className="space-y-1">
-            {WORKFLOW_STEPS.map((step) => (
-              <button
-                key={step.id}
-                onClick={() => setActiveStep(step.id)}
-                className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                  activeStep === step.id
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-                }`}
-              >
-                <div className="font-medium text-sm">{step.label}</div>
-                <div className="text-xs opacity-70">{step.description}</div>
-              </button>
-            ))}
-          </nav>
+      <main className="max-w-screen-xl mx-auto p-6">
+        {/* Error Banner */}
+        {errorMessage && (
+          <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
+            <span>{errorMessage}</span>
+            <button onClick={() => setErrorMessage(null)} className="text-red-500 hover:text-red-700 ml-4 shrink-0">
+              <XIcon />
+            </button>
+          </div>
+        )}
 
-          {/* Stats */}
-          <div className="mt-8 pt-4 border-t border-border">
-            <div className="text-xs text-muted-foreground space-y-1">
-              <div className="flex justify-between">
-                <span>Observations</span>
-                <span>{observations.length}</span>
+        {detailItem && detailObs ? (
+          /* ============ DETAIL PANEL — 4-COLUMN CHAIN VIEW ============ */
+          <div className="w-full">
+            {/* Back button */}
+            <div className="flex items-center gap-3 mb-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setDetailItem(null)}
+                className="gap-1"
+              >
+                <BackIcon /> Back to board
+              </Button>
+            </div>
+
+            {/* Insight title */}
+            <div className="mb-6">
+              <InsightTitle
+                title={detailObs.title}
+                onSave={(title) => handleSaveObservationTitle(detailObs.id, title)}
+                className="text-2xl"
+              />
+            </div>
+
+            {/* 4-column grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 items-start">
+
+              {/* Column 1: Observation (blue) */}
+              <div className="space-y-3">
+                <ColumnHeader label="Observation" color="blue" />
+                <ContentBlock content={detailObs.content} color="blue" />
+                {(coachingText || loadingCoaching) && (
+                  <CoachingArea>
+                    {loadingCoaching ? (
+                      <p className="text-xs text-muted-foreground animate-pulse">Thinking...</p>
+                    ) : coachingText ? (
+                      <p className="text-xs text-amber-800">{coachingText}</p>
+                    ) : null}
+                  </CoachingArea>
+                )}
               </div>
-              <div className="flex justify-between">
-                <span>Harms</span>
-                <span>{harms.length}</span>
+
+              {/* Column 2: Harm (orange) — 1:1 with observation */}
+              <div className="space-y-3">
+                <ColumnHeader label="Harm or Opportunity" color="orange" />
+                {(() => {
+                  const obsHarm = getHarmsForObservation(detailObs.id)[0];
+                  if (obsHarm) {
+                    return (
+                      <ContentBlock
+                        content={obsHarm.content}
+                        color="orange"
+                        onDelete={() => handleDeleteHarm(obsHarm.id)}
+                      />
+                    );
+                  }
+                  return (
+                    <>
+                      <Input
+                        placeholder="What harm could come from this?"
+                        value={customHarmInputs[detailObs.id] || ''}
+                        onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [detailObs.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && addCustomHarm(detailObs.id)}
+                        onFocus={() => handleHarmInputFocus(detailObs.id)}
+                        autoFocus
+                        className="text-sm h-8"
+                      />
+                      <CoachingArea>
+                        <SuggestionPanel
+                          suggestions={harmSuggestions[detailObs.id]}
+                          loading={loadingHarmSuggestions[detailObs.id]}
+                          onToggle={(sid) => toggleHarmSuggestion(detailObs.id, sid)}
+                          onGenerateMore={() => generateMoreHarmSuggestions(detailObs.id)}
+                        />
+                      </CoachingArea>
+                    </>
+                  );
+                })()}
               </div>
-              <div className="flex justify-between">
-                <span>Criteria</span>
-                <span>{criteria.length}</span>
+
+              {/* Column 3: Solution Criteria (green) */}
+              <div className="space-y-3">
+                <ColumnHeader label="Solution Criteria" color="green" />
+                {(() => {
+                  const harm = getHarmsForObservation(detailObs.id)[0];
+                  if (!harm) {
+                    return <p className="text-xs text-muted-foreground italic">Add a harm first</p>;
+                  }
+                  const harmCriteria = getCriteriaForHarm(harm.id);
+                  return (
+                    <>
+                      {harmCriteria.map((crit) => (
+                        <ContentBlock
+                          key={crit.id}
+                          content={crit.content}
+                          color="green"
+                          onDelete={() => handleDeleteCriterion(crit.id)}
+                        />
+                      ))}
+                      <Input
+                        placeholder="The solution should..."
+                        value={customCriterionInputs[harm.id] || ''}
+                        onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
+                        onKeyDown={(e) => e.key === 'Enter' && addCustomCriterion(harm.id)}
+                        onFocus={() => handleCriterionInputFocus(harm.id)}
+                        className="text-sm h-8"
+                      />
+                      <CoachingArea>
+                        <SuggestionPanel
+                          suggestions={criterionSuggestions[harm.id]}
+                          loading={loadingCriterionSuggestions[harm.id]}
+                          onToggle={(sid) => toggleCriterionSuggestion(harm.id, sid)}
+                          onGenerateMore={() => generateMoreCriterionSuggestions(harm.id)}
+                        />
+                      </CoachingArea>
+                    </>
+                  );
+                })()}
               </div>
-              <div className="flex justify-between">
-                <span>Strategies</span>
-                <span>{strategies.length}</span>
+
+              {/* Column 4: Strategies (purple) */}
+              <div className="space-y-3">
+                <ColumnHeader label="Strategies" color="purple" />
+                {(() => {
+                  const harm = getHarmsForObservation(detailObs.id)[0];
+                  const allCriteria = harm ? getCriteriaForHarm(harm.id) : [];
+                  if (allCriteria.length === 0) {
+                    return <p className="text-xs text-muted-foreground italic">Add a criterion first</p>;
+                  }
+                  return allCriteria.map((crit) => {
+                    const critStrategies = getStrategiesForCriterion(crit.id);
+                    return (
+                      <div key={crit.id} className="space-y-2">
+                        {allCriteria.length > 1 && (
+                          <p className="text-xs text-muted-foreground truncate" title={crit.content}>
+                            {crit.content}
+                          </p>
+                        )}
+                        {critStrategies.map((strat) => (
+                          <ContentBlock
+                            key={strat.id}
+                            content={strat.content}
+                            color="purple"
+                            onDelete={() => handleDeleteStrategy(strat.id)}
+                            suffix={strat.strategyType ? (
+                              <span className="text-xs text-purple-400 ml-1">({strat.strategyType})</span>
+                            ) : undefined}
+                          />
+                        ))}
+                        <Input
+                          placeholder="How might we...?"
+                          value={customStrategyInputs[crit.id] || ''}
+                          onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
+                          onKeyDown={(e) => e.key === 'Enter' && addCustomStrategy(crit.id)}
+                          onFocus={() => handleStrategyInputFocus(crit.id)}
+                          className="text-sm h-8"
+                        />
+                        <CoachingArea>
+                          <SuggestionPanel
+                            suggestions={strategySuggestions[crit.id]}
+                            loading={loadingStrategySuggestions[crit.id]}
+                            onToggle={(sid) => toggleStrategySuggestion(crit.id, sid)}
+                            onGenerateMore={() => generateMoreStrategySuggestions(crit.id)}
+                            showType
+                          />
+                        </CoachingArea>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
+
             </div>
           </div>
-        </aside>
-
-        {/* Main Content */}
-        <main className="flex-1 p-6 max-w-4xl">
-          {/* Error Banner */}
-          {errorMessage && (
-            <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-800 text-sm flex items-center justify-between">
-              <span>{errorMessage}</span>
-              <button onClick={() => setErrorMessage(null)} className="text-red-500 hover:text-red-700 ml-4 shrink-0">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                </svg>
-              </button>
-            </div>
-          )}
-
-          {/* Overview View */}
-          {activeStep === 'overview' && (
-            <div className="space-y-6">
-              {/* Project Header */}
-              <div className="flex items-start justify-between">
-                <div>
-                  {isEditingName ? (
-                    <Input
-                      value={projectName}
-                      onChange={(e) => setProjectName(e.target.value)}
-                      onBlur={handleSaveProjectName}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSaveProjectName()}
-                      className="text-2xl font-semibold h-auto py-1 px-2 w-auto"
-                      autoFocus
-                    />
-                  ) : (
-                    <h1
-                      className="text-2xl font-semibold text-foreground cursor-pointer hover:text-muted-foreground transition-colors"
-                      onClick={() => setIsEditingName(true)}
-                    >
-                      {projectName}
-                    </h1>
-                  )}
-                  {isArchived && (
-                    <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded mt-2 inline-block">
-                      Archived
-                    </span>
-                  )}
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" x2="12" y1="15" y2="3" />
-                    </svg>
-                    Export
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleToggleArchive}
-                    className="text-muted-foreground"
-                  >
-                    {isArchived ? (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
-                          <rect width="20" height="5" x="2" y="3" rx="1" />
-                          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-                        </svg>
-                        Unarchive
-                      </>
-                    ) : (
-                      <>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-1">
-                          <rect width="20" height="5" x="2" y="3" rx="1" />
-                          <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
-                          <path d="M10 12h4" />
-                        </svg>
-                        Archive
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              <p className="text-sm text-muted-foreground">
-                A bird's eye view of your synthesis — see how observations connect to insights.
-              </p>
-
-              {/* Empty state */}
-              {observations.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-12 text-center">
-                    <p className="text-muted-foreground mb-4">No observations yet. Start by capturing what you observed.</p>
-                    <Button variant="outline" onClick={() => setActiveStep('observations')}>
-                      Add Observations
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                /* Synthesis Tree */
-                <div className="space-y-4">
-                  {observations.map((obs) => {
-                    const obsHarms = getHarmsForObservation(obs.id);
-                    return (
-                      <Card key={obs.id}>
-                        <CardContent className="py-4">
-                          {/* Observation */}
-                          <div className="flex items-start gap-3">
-                            <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 shrink-0" />
-                            <div className="flex-1">
-                              <p className="text-xs text-muted-foreground mb-1">Observation</p>
-                              <p className="text-foreground">{obs.content}</p>
-                            </div>
-                          </div>
-
-                          {/* Harms */}
-                          <div className="ml-5 mt-3 pl-4 border-l-2 border-border space-y-3">
-                            {obsHarms.map((harm) => {
-                              const harmCriteria = getCriteriaForHarm(harm.id);
-                              return (
-                                <div key={harm.id}>
-                                  <div className="flex items-start gap-3">
-                                    <div className="w-2 h-2 rounded-full bg-orange-500 mt-2 shrink-0" />
-                                    <div className="flex-1">
-                                      <p className="text-xs text-muted-foreground mb-1">Harm</p>
-                                      <p className="text-sm text-foreground">{harm.content}</p>
-                                    </div>
-                                  </div>
-
-                                  {/* Criteria */}
-                                  <div className="ml-5 mt-2 pl-4 border-l-2 border-border space-y-2">
-                                    {harmCriteria.map((crit) => {
-                                      const critStrategies = getStrategiesForCriterion(crit.id);
-                                      return (
-                                        <div key={crit.id}>
-                                          <div className="flex items-start gap-3">
-                                            <div className="w-2 h-2 rounded-full bg-green-500 mt-2 shrink-0" />
-                                            <div className="flex-1">
-                                              <p className="text-xs text-muted-foreground mb-1">Criterion</p>
-                                              <p className="text-sm text-foreground">{crit.content}</p>
-                                            </div>
-                                          </div>
-
-                                          {/* Strategies */}
-                                          <div className="ml-5 mt-2 pl-4 border-l-2 border-border space-y-1">
-                                            {critStrategies.map((strat) => (
-                                              <div key={strat.id} className="flex items-start gap-3">
-                                                <div className="w-2 h-2 rounded-full bg-purple-500 mt-2 shrink-0" />
-                                                <div className="flex-1">
-                                                  <p className="text-xs text-muted-foreground mb-1">
-                                                    Strategy {strat.strategyType && <span className="opacity-60">({strat.strategyType})</span>}
-                                                  </p>
-                                                  <p className="text-sm text-foreground">{strat.content}</p>
-                                                </div>
-                                              </div>
-                                            ))}
-                                            <button
-                                              onClick={() => navigateToInput('strategies', crit.id)}
-                                              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors pl-5"
-                                            >
-                                              + add strategy
-                                            </button>
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                    <button
-                                      onClick={() => navigateToInput('criteria', harm.id)}
-                                      className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors pl-5"
-                                    >
-                                      + add criterion
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                            <button
-                              onClick={() => navigateToInput('harms', obs.id)}
-                              className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors pl-5"
-                            >
-                              + add harm
-                            </button>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Quick action to continue */}
-              {observations.length > 0 && (
-                <div className="flex justify-end pt-4">
-                  <Button variant="outline" onClick={() => setActiveStep('observations')} className="gap-2">
-                    Edit Observations
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m9 18 6-6-6-6" />
-                    </svg>
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Observations View */}
-          {activeStep === 'observations' && (
-            <div className="space-y-6">
+        ) : (
+          /* ============ CARD GRID VIEW ============ */
+          <>
+            {/* Project Header */}
+            <div className="flex items-start justify-between mb-6">
               <div>
-                <h2 className="text-lg font-medium text-foreground">Observations</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Capture objective facts from your research — things you saw or heard.
-                </p>
+                {isEditingName ? (
+                  <Input
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    onBlur={handleSaveProjectName}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSaveProjectName()}
+                    className="text-2xl font-semibold h-auto py-1 px-2 w-auto"
+                    autoFocus
+                  />
+                ) : (
+                  <h1
+                    className="text-2xl font-semibold text-foreground cursor-pointer hover:text-muted-foreground transition-colors"
+                    onClick={() => setIsEditingName(true)}
+                  >
+                    {projectName}
+                  </h1>
+                )}
+                {isArchived && (
+                  <span className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded mt-2 inline-block">Archived</span>
+                )}
+              </div>
+              <div className="flex gap-2 items-center">
+                <span className="text-xs text-muted-foreground hidden sm:inline">
+                  {observations.length} obs &middot; {harms.length} harms &middot; {criteria.length} criteria &middot; {strategies.length} strategies
+                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="gap-2">
+                      {copyFeedback || 'Copy'}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={handleCopyAll}>
+                      Copy All
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleCopyMatrix}>
+                      Copy as Matrix
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => handleCopyType('observations')} disabled={observations.length === 0}>
+                      Copy Observations
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCopyType('harms')} disabled={harms.length === 0}>
+                      Copy Harms
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCopyType('criteria')} disabled={criteria.length === 0}>
+                      Copy Criteria
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleCopyType('strategies')} disabled={strategies.length === 0}>
+                      Copy Strategies
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                <Button variant="ghost" size="sm" onClick={handleToggleArchive} className="text-muted-foreground">
+                  {isArchived ? 'Unarchive' : 'Archive'}
+                </Button>
+              </div>
+            </div>
+
+            {/* Card Grid */}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={observations.map(o => o.id)} strategy={rectSortingStrategy}>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 items-start">
+                  {/* Existing insight cards */}
+                  {observations.map((obs) => (
+                    <SortableCard
+                      key={obs.id}
+                      obs={obs}
+                      obsHarms={getHarmsForObservation(obs.id)}
+                      getCriteriaForHarm={getCriteriaForHarm}
+                      getStrategiesForCriterion={getStrategiesForCriterion}
+                      inlineAdd={inlineAdd}
+                      setInlineAdd={setInlineAdd}
+                      setDetailItem={setDetailItem}
+                      handleSaveObservationTitle={handleSaveObservationTitle}
+                      handleDeleteHarm={handleDeleteHarm}
+                      handleDeleteCriterion={handleDeleteCriterion}
+                      handleDeleteStrategy={handleDeleteStrategy}
+                      handleAddObservationFromBranch={handleAddObservationFromBranch}
+                      customHarmInputs={customHarmInputs}
+                      setCustomHarmInputs={setCustomHarmInputs}
+                      addCustomHarm={addCustomHarm}
+                      customCriterionInputs={customCriterionInputs}
+                      setCustomCriterionInputs={setCustomCriterionInputs}
+                      addCustomCriterion={addCustomCriterion}
+                      customStrategyInputs={customStrategyInputs}
+                      setCustomStrategyInputs={setCustomStrategyInputs}
+                      addCustomStrategy={addCustomStrategy}
+                    />
+                  ))}
+
+                  {/* New Insight Card — always present, NOT sortable */}
+                  <Card className="border-dashed">
+                    <CardContent className="pt-4 pb-4 space-y-3">
+                      <p className="text-sm text-muted-foreground font-medium">[add title]</p>
+
+                      <Textarea
+                        placeholder="What did you observe?"
+                        value={newObservation}
+                        onChange={(e) => handleObservationChange(e.target.value)}
+                        className="min-h-[80px] resize-none text-sm"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            if (newObservation.trim()) {
+                              if (e.shiftKey) {
+                                // Shift+Enter: save observation and open inline harm input
+                                handleAddObservation().then((id) => {
+                                  if (id) setInlineAdd({ parentId: id, type: 'harm' });
+                                });
+                              } else {
+                                handleAddObservation();
+                              }
+                            }
+                          }
+                        }}
+                      />
+
+                      {/* Coaching text */}
+                      {loadingCoaching && (
+                        <p className="text-xs text-muted-foreground animate-pulse">Thinking...</p>
+                      )}
+                      {coachingText && !loadingCoaching && (
+                        <p className="text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-md">
+                          {coachingText}
+                        </p>
+                      )}
+
+                      <p className="text-xs text-muted-foreground">
+                        Enter to add &middot; Shift+Enter to add harms
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+              </SortableContext>
+            </DndContext>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+
+// ============ SUB-COMPONENTS ============
+
+// Sortable card wrapper — uses dnd-kit's useSortable hook for drag-and-drop
+function SortableCard({
+  obs,
+  obsHarms,
+  getCriteriaForHarm,
+  getStrategiesForCriterion,
+  inlineAdd,
+  setInlineAdd,
+  setDetailItem,
+  handleSaveObservationTitle,
+  handleDeleteHarm,
+  handleDeleteCriterion,
+  handleDeleteStrategy,
+  handleAddObservationFromBranch,
+  customHarmInputs,
+  setCustomHarmInputs,
+  addCustomHarm,
+  customCriterionInputs,
+  setCustomCriterionInputs,
+  addCustomCriterion,
+  customStrategyInputs,
+  setCustomStrategyInputs,
+  addCustomStrategy,
+}: {
+  obs: Observation;
+  obsHarms: Harm[];
+  getCriteriaForHarm: (harmId: string) => Criterion[];
+  getStrategiesForCriterion: (criterionId: string) => Strategy[];
+  inlineAdd: { parentId: string; type: 'harm' | 'criterion' | 'strategy' } | null;
+  setInlineAdd: (v: { parentId: string; type: 'harm' | 'criterion' | 'strategy' } | null) => void;
+  setDetailItem: (v: DetailItem | null) => void;
+  handleSaveObservationTitle: (obsId: string, title: string) => void;
+  handleDeleteHarm: (harmId: string) => void;
+  handleDeleteCriterion: (criterionId: string) => void;
+  handleDeleteStrategy: (strategyId: string) => void;
+  handleAddObservationFromBranch: (sourceObsId: string, content: string) => Promise<string | null>;
+  customHarmInputs: Record<string, string>;
+  setCustomHarmInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  addCustomHarm: (obsId: string) => void;
+  customCriterionInputs: Record<string, string>;
+  setCustomCriterionInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  addCustomCriterion: (harmId: string) => void;
+  customStrategyInputs: Record<string, string>;
+  setCustomStrategyInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  addCustomStrategy: (criterionId: string) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: obs.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
+  return (
+    <Card
+      ref={setNodeRef}
+      style={style}
+      className={`group/card ${isDragging ? 'shadow-lg' : ''}`}
+      data-item-id={obs.id}
+    >
+      <CardContent className="pt-4 pb-4 space-y-3">
+        {/* Title + drag handle + expand */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 min-w-0 flex-1">
+            {/* Drag handle */}
+            <button
+              {...attributes}
+              {...listeners}
+              className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground transition-colors shrink-0 p-1 touch-none"
+              title="Drag to reorder"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" />
+                <circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" />
+                <circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+              </svg>
+            </button>
+            <InsightTitle
+              title={obs.title}
+              onSave={(title) => handleSaveObservationTitle(obs.id, title)}
+            />
+          </div>
+          <button
+            onClick={() => setDetailItem({ type: 'observation', id: obs.id })}
+            className="text-muted-foreground hover:text-foreground transition-colors shrink-0 p-1"
+            title="Expand"
+          >
+            <ExpandIcon />
+          </button>
+        </div>
+
+        {/* Observation */}
+        <div className="px-3 py-2 rounded-md bg-blue-50 border border-blue-100">
+          <p className="text-sm text-blue-900">{obs.content}</p>
+        </div>
+
+        {/* Harms */}
+        {obsHarms.map((harm) => {
+          const harmCriteria = getCriteriaForHarm(harm.id);
+          return (
+            <div key={harm.id} className="space-y-2">
+              <div
+                className="px-3 py-2 rounded-md bg-orange-50 border border-orange-100 cursor-pointer hover:border-orange-200 transition-colors group/harm"
+                onClick={() => setInlineAdd(
+                  inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion'
+                    ? null
+                    : { parentId: harm.id, type: 'criterion' }
+                )}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-sm text-orange-900">{harm.content}</p>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteHarm(harm.id); }}
+                    className="opacity-0 group-hover/harm:opacity-100 transition-opacity text-orange-400 hover:text-orange-600 shrink-0"
+                  >
+                    <XIcon size={12} />
+                  </button>
+                </div>
               </div>
 
-              {/* Input Area */}
-              <Card>
-                <CardContent className="pt-4">
-                  <Textarea
-                    placeholder="What did you observe?"
-                    value={newObservation}
-                    onChange={(e) => setNewObservation(e.target.value)}
-                    className="min-h-[80px] resize-none"
+              {/* Inline add criterion */}
+              {inlineAdd && inlineAdd.parentId === harm.id && inlineAdd.type === 'criterion' && (
+                <div className="ml-3 space-y-1">
+                  <Input
+                    autoFocus
+                    placeholder="What design criterion applies?"
+                    value={customCriterionInputs[harm.id] || ''}
+                    onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        if (newObservation.trim()) {
-                          handleAddObservation();
-                        }
+                      if (e.key === 'Enter') {
+                        addCustomCriterion(harm.id);
+                      } else if (e.key === 'Escape') {
+                        setInlineAdd(null);
                       }
                     }}
+                    onBlur={() => {
+                      if (!customCriterionInputs[harm.id]?.trim()) setInlineAdd(null);
+                    }}
+                    className="text-sm h-8 bg-green-50 border-green-200 placeholder:text-green-300"
                   />
-                  <div className="flex justify-between items-center mt-3">
-                    <span className="text-xs text-muted-foreground">
-                      Enter to add, Shift+Enter for new line
-                    </span>
-                    <Button onClick={handleAddObservation} disabled={!newObservation.trim()} size="sm">
-                      Add
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Observation List */}
-              {observations.length === 0 ? (
-                <div className="text-center py-12 text-muted-foreground">
-                  <p className="text-sm">No observations yet. Add what you saw or heard during research.</p>
+                  <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  {observations.map((obs) => (
-                    <Card key={obs.id} className="group">
-                      <CardContent className="py-4">
-                        <div className="flex items-start justify-between gap-4">
-                          <p className="text-foreground">{obs.content}</p>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground shrink-0"
-                            onClick={() => handleDeleteObservation(obs.id)}
+              )}
+
+              {/* Criteria under this harm */}
+              {harmCriteria.map((crit) => {
+                const critStrategies = getStrategiesForCriterion(crit.id);
+                return (
+                  <div key={crit.id} className="ml-3 space-y-1">
+                    <div
+                      className="px-3 py-2 rounded-md bg-green-50 border border-green-100 cursor-pointer hover:border-green-200 transition-colors group/crit"
+                      onClick={() => setInlineAdd(
+                        inlineAdd?.parentId === crit.id && inlineAdd?.type === 'strategy'
+                          ? null
+                          : { parentId: crit.id, type: 'strategy' }
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm text-green-900">{crit.content}</p>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteCriterion(crit.id); }}
+                          className="opacity-0 group-hover/crit:opacity-100 transition-opacity text-green-400 hover:text-green-600 shrink-0"
+                        >
+                          <XIcon size={12} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Strategies under this criterion */}
+                    {critStrategies.map((strat) => (
+                      <div
+                        key={strat.id}
+                        className="ml-3 px-3 py-2 rounded-md bg-purple-50 border border-purple-100 group/strat"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm text-purple-900">
+                            {strat.content}
+                            {strat.strategyType && (
+                              <span className="text-xs text-purple-400 ml-1">({strat.strategyType})</span>
+                            )}
+                          </p>
+                          <button
+                            onClick={() => handleDeleteStrategy(strat.id)}
+                            className="opacity-0 group-hover/strat:opacity-100 transition-opacity text-purple-400 hover:text-purple-600 shrink-0"
                           >
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M18 6 6 18" /><path d="m6 6 12 12" />
-                            </svg>
-                          </Button>
+                            <XIcon size={12} />
+                          </button>
                         </div>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
+                      </div>
+                    ))}
 
-              {observations.length > 0 && (
-                <div className="flex justify-end pt-4">
-                  <Button variant="outline" onClick={() => setActiveStep('harms')} className="gap-2">
-                    Continue to Harms
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m9 18 6-6-6-6" />
-                    </svg>
-                  </Button>
-                </div>
-              )}
+                    {/* Inline add strategy */}
+                    {inlineAdd && inlineAdd.parentId === crit.id && inlineAdd.type === 'strategy' && (
+                      <div className="ml-3 space-y-1">
+                        <Input
+                          autoFocus
+                          placeholder="How might we...?"
+                          value={customStrategyInputs[crit.id] || ''}
+                          onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              addCustomStrategy(crit.id);
+                            } else if (e.key === 'Escape') {
+                              setInlineAdd(null);
+                            }
+                          }}
+                          onBlur={() => {
+                            if (!customStrategyInputs[crit.id]?.trim()) setInlineAdd(null);
+                          }}
+                          className="text-sm h-8 bg-purple-50 border-purple-200 placeholder:text-purple-300"
+                        />
+                        <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+          );
+        })}
+
+        {/* Inline add input — harm (if no harm yet) */}
+        {inlineAdd && inlineAdd.parentId === obs.id && inlineAdd.type === 'harm' && (
+          <div className="space-y-1">
+            <Input
+              autoFocus
+              placeholder="What harm could come from this?"
+              value={customHarmInputs[obs.id] || ''}
+              onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [obs.id]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  addCustomHarm(obs.id);
+                } else if (e.key === 'Escape') {
+                  setInlineAdd(null);
+                }
+              }}
+              onBlur={() => {
+                if (!customHarmInputs[obs.id]?.trim()) setInlineAdd(null);
+              }}
+              className="text-sm h-8 bg-orange-50 border-orange-200 placeholder:text-orange-300"
+            />
+            <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
+          </div>
+        )}
+
+        {/* Context-aware add button + branch */}
+        <div className="flex gap-2">
+          {obsHarms.length === 0 ? (
+            /* No harm yet — "+" adds a harm */
+            <button
+              onClick={() => setInlineAdd(
+                inlineAdd?.parentId === obs.id && inlineAdd?.type === 'harm'
+                  ? null
+                  : { parentId: obs.id, type: 'harm' }
+              )}
+              className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+            >
+              <PlusIcon /> <span>add harm</span>
+            </button>
+          ) : (
+            /* Has a harm — "+" adds to the deepest available level */
+            <>
+              <button
+                onClick={() => {
+                  const harm = obsHarms[0];
+                  const harmCrit = getCriteriaForHarm(harm.id);
+                  if (harmCrit.length === 0) {
+                    // No criteria yet — add criterion
+                    setInlineAdd(
+                      inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion'
+                        ? null
+                        : { parentId: harm.id, type: 'criterion' }
+                    );
+                  } else {
+                    // Has criteria — add strategy to the last criterion
+                    const lastCrit = harmCrit[harmCrit.length - 1];
+                    setInlineAdd(
+                      inlineAdd?.parentId === lastCrit.id && inlineAdd?.type === 'strategy'
+                        ? null
+                        : { parentId: lastCrit.id, type: 'strategy' }
+                    );
+                  }
+                }}
+                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+              >
+                <PlusIcon />
+              </button>
+              {/* Branch: duplicate observation with a different harm */}
+              <button
+                onClick={async () => {
+                  const id = await handleAddObservationFromBranch(obs.id, obs.content);
+                  if (id) setInlineAdd({ parentId: id, type: 'harm' });
+                }}
+                className="flex items-center justify-center gap-1 py-2 px-3 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+                title="Branch: explore a different harm from this observation"
+              >
+                <ForkIcon />
+              </button>
+            </>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
-          {/* Harms View */}
-          {activeStep === 'harms' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">Harms</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  For each observation, identify what value is being compromised.
-                </p>
-              </div>
+function InsightTitle({ title, onSave, className }: { title?: string; onSave: (title: string) => void; className?: string }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(title || '');
+  const sizeClass = className || 'text-sm';
 
-              {observations.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-12 text-center">
-                    <p className="text-muted-foreground mb-4">Add some observations first.</p>
-                    <Button variant="outline" onClick={() => setActiveStep('observations')}>
-                      Go to Observations
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-6">
-                  {observations.map((obs) => (
-                    <Card key={obs.id}>
-                      <CardContent className="pt-4 space-y-4">
-                        {/* Observation context at top */}
-                        <div className="px-3 py-2 rounded bg-muted/30">
-                          <p className="text-xs text-muted-foreground mb-1">Observation:</p>
-                          <p className="text-sm text-muted-foreground">{obs.content}</p>
-                        </div>
+  useEffect(() => { setValue(title || ''); }, [title]);
 
-                        {/* Custom input */}
-                        <div>
-                          <Input
-                            placeholder="What value is being compromised?"
-                            value={customHarmInputs[obs.id] || ''}
-                            onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [obs.id]: e.target.value }))}
-                            onKeyDown={(e) => e.key === 'Enter' && addCustomHarm(obs.id)}
-                            onFocus={() => handleHarmInputFocus(obs.id)}
-                            onBlur={() => setTimeout(() => setFocusedInputId(prev => prev === obs.id ? null : prev), 200)}
-                            data-input-id={obs.id}
-                            className="w-full"
-                          />
-                        </div>
+  if (editing) {
+    return (
+      <Input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => { setEditing(false); if (value.trim()) onSave(value.trim()); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { setEditing(false); if (value.trim()) onSave(value.trim()); }
+          if (e.key === 'Escape') { setEditing(false); setValue(title || ''); }
+        }}
+        placeholder="Add title..."
+        autoFocus
+        className={`${sizeClass} font-medium h-auto py-0.5 px-1 w-auto`}
+      />
+    );
+  }
 
-                        {/* Added harms for this observation */}
-                        {getHarmsForObservation(obs.id).length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Added:</p>
-                            <div className="flex flex-wrap gap-2">
-                              {getHarmsForObservation(obs.id).map(harm => (
-                                <span key={harm.id} className="text-sm bg-primary/10 text-primary px-3 py-1.5 rounded">
-                                  {harm.content}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className={`${sizeClass} font-medium text-left truncate ${title ? 'text-foreground' : 'text-muted-foreground'} hover:text-muted-foreground transition-colors`}
+    >
+      {title || '[add title]'}
+    </button>
+  );
+}
 
-                        {/* Suggestions - only shown when this input is focused */}
-                        {focusedInputId === obs.id && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Suggestions:</p>
-                            {loadingHarmSuggestions[obs.id] && (
-                              <p className="text-sm text-muted-foreground animate-pulse">Generating suggestions...</p>
-                            )}
-                            {harmSuggestions[obs.id]?.filter(s => !s.selected).map((suggestion) => (
-                              <div
-                                key={suggestion.id}
-                                onClick={() => toggleHarmSuggestion(obs.id, suggestion.id)}
-                                className="p-3 rounded-lg cursor-pointer transition-colors hover:opacity-80"
-                                style={{ backgroundColor: 'rgb(255, 251, 235)' }}
-                              >
-                                <span className="text-sm">{suggestion.content}</span>
-                              </div>
-                            ))}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => generateMoreHarmSuggestions(obs.id)}
-                              className="text-muted-foreground"
-                            >
-                              + Generate more suggestions
-                            </Button>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
+function SuggestionPanel({
+  suggestions,
+  loading,
+  onToggle,
+  onGenerateMore,
+  showType,
+}: {
+  suggestions?: Array<{ id: string; content: string; selected: boolean; type?: string }>;
+  loading?: boolean;
+  onToggle: (suggestionId: string) => void;
+  onGenerateMore: () => void;
+  showType?: boolean;
+}) {
+  const unselected = suggestions?.filter(s => !s.selected) || [];
+  const visible = unselected.slice(0, 3);
 
-              {harms.length > 0 && (
-                <div className="flex justify-end pt-4">
-                  <Button variant="outline" onClick={() => setActiveStep('criteria')} className="gap-2">
-                    Continue to Criteria
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m9 18 6-6-6-6" />
-                    </svg>
-                  </Button>
-                </div>
-              )}
-            </div>
+  return (
+    <div className="space-y-2">
+      {loading && (
+        <p className="text-xs text-muted-foreground animate-pulse">Generating...</p>
+      )}
+      {visible.map((suggestion) => (
+        <div
+          key={suggestion.id}
+          onClick={() => onToggle(suggestion.id)}
+          className="p-2 rounded-md cursor-pointer transition-colors hover:opacity-80 text-sm"
+          style={{ backgroundColor: 'rgb(255, 251, 235)' }}
+        >
+          {suggestion.content}
+          {showType && suggestion.type && (
+            <span className="text-xs text-muted-foreground ml-1">({suggestion.type})</span>
           )}
-
-          {/* Criteria View */}
-          {activeStep === 'criteria' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">Criteria</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Define what the solution must do to address each harm.
-                </p>
-              </div>
-
-              {harms.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-12 text-center">
-                    <p className="text-muted-foreground mb-4">Identify some harms first.</p>
-                    <Button variant="outline" onClick={() => setActiveStep('harms')}>
-                      Go to Harms
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-6">
-                  {harms.map((harm) => (
-                    <Card key={harm.id}>
-                      <CardContent className="pt-4 space-y-4">
-                        {/* Harm context at top */}
-                        <div className="px-3 py-2 rounded bg-muted/30">
-                          <p className="text-xs text-muted-foreground mb-1">Harm:</p>
-                          <p className="text-sm text-muted-foreground">{harm.content}</p>
-                        </div>
-
-                        {/* Custom input */}
-                        <div>
-                          <Input
-                            placeholder="The solution should..."
-                            value={customCriterionInputs[harm.id] || ''}
-                            onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
-                            onKeyDown={(e) => e.key === 'Enter' && addCustomCriterion(harm.id)}
-                            onFocus={() => handleCriterionInputFocus(harm.id)}
-                            onBlur={() => setTimeout(() => setFocusedInputId(prev => prev === harm.id ? null : prev), 200)}
-                            data-input-id={harm.id}
-                            className="w-full"
-                          />
-                        </div>
-
-                        {/* Added criteria for this harm */}
-                        {getCriteriaForHarm(harm.id).length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Added:</p>
-                            <div className="flex flex-wrap gap-2">
-                              {getCriteriaForHarm(harm.id).map(crit => (
-                                <span key={crit.id} className="text-sm bg-primary/10 text-primary px-3 py-1.5 rounded">
-                                  {crit.content}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Suggestions - only shown when this input is focused */}
-                        {focusedInputId === harm.id && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Suggestions:</p>
-                            {loadingCriterionSuggestions[harm.id] && (
-                              <p className="text-sm text-muted-foreground animate-pulse">Generating suggestions...</p>
-                            )}
-                            {criterionSuggestions[harm.id]?.filter(s => !s.selected).map((suggestion) => (
-                              <div
-                                key={suggestion.id}
-                                onClick={() => toggleCriterionSuggestion(harm.id, suggestion.id)}
-                                className="p-3 rounded-lg cursor-pointer transition-colors hover:opacity-80"
-                                style={{ backgroundColor: 'rgb(255, 251, 235)' }}
-                              >
-                                <span className="text-sm">{suggestion.content}</span>
-                              </div>
-                            ))}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => generateMoreCriterionSuggestions(harm.id)}
-                              className="text-muted-foreground"
-                            >
-                              + Generate more suggestions
-                            </Button>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-
-              {criteria.length > 0 && (
-                <div className="flex justify-end pt-4">
-                  <Button variant="outline" onClick={() => setActiveStep('strategies')} className="gap-2">
-                    Continue to Strategies
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m9 18 6-6-6-6" />
-                    </svg>
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Strategies View */}
-          {activeStep === 'strategies' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">Strategies</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Generate "How Might We" statements to explore solution directions.
-                </p>
-              </div>
-
-              {criteria.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-12 text-center">
-                    <p className="text-muted-foreground mb-4">Define some criteria first.</p>
-                    <Button variant="outline" onClick={() => setActiveStep('criteria')}>
-                      Go to Criteria
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-6">
-                  {criteria.map((crit) => (
-                    <Card key={crit.id}>
-                      <CardContent className="pt-4 space-y-4">
-                        {/* Criterion context at top */}
-                        <div className="px-3 py-2 rounded bg-muted/30">
-                          <p className="text-xs text-muted-foreground mb-1">Criterion:</p>
-                          <p className="text-sm text-muted-foreground">{crit.content}</p>
-                        </div>
-
-                        {/* Custom input */}
-                        <div>
-                          <Input
-                            placeholder="How might we..."
-                            value={customStrategyInputs[crit.id] || ''}
-                            onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
-                            onKeyDown={(e) => e.key === 'Enter' && addCustomStrategy(crit.id)}
-                            onFocus={() => handleStrategyInputFocus(crit.id)}
-                            onBlur={() => setTimeout(() => setFocusedInputId(prev => prev === crit.id ? null : prev), 200)}
-                            data-input-id={crit.id}
-                            className="w-full"
-                          />
-                        </div>
-
-                        {/* Added strategies for this criterion */}
-                        {getStrategiesForCriterion(crit.id).length > 0 && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Added:</p>
-                            <div className="flex flex-wrap gap-2">
-                              {getStrategiesForCriterion(crit.id).map(strat => (
-                                <span key={strat.id} className="text-sm bg-primary/10 text-primary px-3 py-1.5 rounded">
-                                  {strat.content}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Suggestions - only shown when this input is focused */}
-                        {focusedInputId === crit.id && (
-                          <div className="space-y-2">
-                            <p className="text-xs text-muted-foreground">Suggestions:</p>
-                            {loadingStrategySuggestions[crit.id] && (
-                              <p className="text-sm text-muted-foreground animate-pulse">Generating suggestions...</p>
-                            )}
-                            {strategySuggestions[crit.id]?.filter(s => !s.selected).map((suggestion) => (
-                              <div
-                                key={suggestion.id}
-                                onClick={() => toggleStrategySuggestion(crit.id, suggestion.id)}
-                                className="p-3 rounded-lg cursor-pointer transition-colors hover:opacity-80"
-                                style={{ backgroundColor: 'rgb(255, 251, 235)' }}
-                              >
-                                <span className="text-sm">{suggestion.content}</span>
-                                <span className="text-xs text-muted-foreground ml-2">({suggestion.type})</span>
-                              </div>
-                            ))}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => generateMoreStrategySuggestions(crit.id)}
-                              className="text-muted-foreground"
-                            >
-                              + Generate more suggestions
-                            </Button>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              )}
-
-              {strategies.length > 0 && (
-                <div className="flex justify-end pt-4">
-                  <Button variant="outline" onClick={() => setActiveStep('overview')} className="gap-2">
-                    View Overview
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="m9 18 6-6-6-6" />
-                    </svg>
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-        </main>
-      </div>
+        </div>
+      ))}
+      {!loading && (
+        <button
+          onClick={onGenerateMore}
+          className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+        >
+          ↻ more suggestions
+        </button>
+      )}
     </div>
   );
 }

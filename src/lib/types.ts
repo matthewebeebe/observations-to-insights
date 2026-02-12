@@ -21,6 +21,8 @@ export interface Observation {
   id: string;
   projectId: string;
   content: string;
+  title?: string;
+  order?: number;
   clusterId?: string;
   createdAt: Date;
 }

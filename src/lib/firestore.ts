@@ -10,6 +10,7 @@ import {
   where,
   serverTimestamp,
   Timestamp,
+  writeBatch,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import type { Project, Observation, Harm, Criterion, Strategy } from './types';
@@ -118,17 +119,29 @@ export async function getObservations(projectId: string): Promise<Observation[]>
     createdAt: convertTimestamp(doc.data().createdAt),
   })) as Observation[];
 
-  return observations.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return observations.sort((a, b) => {
+    // Sort by order if present, otherwise fall back to createdAt
+    const orderA = a.order ?? a.createdAt.getTime();
+    const orderB = b.order ?? b.createdAt.getTime();
+    return orderA - orderB;
+  });
 }
 
-export async function createObservation(projectId: string, content: string): Promise<string> {
+export async function createObservation(projectId: string, content: string, title?: string, order?: number): Promise<string> {
   if (!db) throw new Error('Firestore not initialized');
 
-  const docRef = await addDoc(collection(db, 'observations'), {
+  const data: Record<string, unknown> = {
     projectId,
     content,
+    order: order ?? Date.now(),
     createdAt: serverTimestamp(),
-  });
+  };
+
+  if (title) {
+    data.title = title;
+  }
+
+  const docRef = await addDoc(collection(db, 'observations'), data);
 
   // Update project timestamp (non-blocking — don't fail the observation if this errors)
   updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
@@ -136,11 +149,28 @@ export async function createObservation(projectId: string, content: string): Pro
   return docRef.id;
 }
 
+export async function updateObservation(observationId: string, data: Partial<{ content: string; title: string; order: number }>): Promise<void> {
+  if (!db) throw new Error('Firestore not initialized');
+
+  const docRef = doc(db, 'observations', observationId);
+  await updateDoc(docRef, data);
+}
+
 export async function deleteObservation(observationId: string): Promise<void> {
   if (!db) throw new Error('Firestore not initialized');
 
   const docRef = doc(db, 'observations', observationId);
   await deleteDoc(docRef);
+}
+
+export async function updateObservationOrder(updates: { id: string; order: number }[]): Promise<void> {
+  if (!db) throw new Error('Firestore not initialized');
+
+  const batch = writeBatch(db);
+  for (const { id, order } of updates) {
+    batch.update(doc(db, 'observations', id), { order });
+  }
+  await batch.commit();
 }
 
 async function deleteObservationsByProject(projectId: string): Promise<void> {
