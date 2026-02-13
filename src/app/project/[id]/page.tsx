@@ -21,11 +21,14 @@ import {
   getHarms,
   createHarm,
   deleteHarm,
+  updateHarm,
   getCriteria,
   createCriterion,
+  updateCriterion,
   deleteCriterion,
   getStrategies,
   createStrategy,
+  updateStrategy,
   deleteStrategy,
 } from '@/lib/firestore';
 import { getPrompts } from '@/lib/prompts';
@@ -125,12 +128,22 @@ function PlusIcon() {
   );
 }
 
-// Fork/branch icon
-function ForkIcon() {
+// Duplicate/copy icon
+function DuplicateIcon() {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" />
-      <path d="M18 9v2c0 .6-.4 1-1 1H7c-.6 0-1-.4-1-1V9" /><path d="M12 12v3" />
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+// Settings gear icon
+function SettingsIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+      <circle cx="12" cy="12" r="3"/>
     </svg>
   );
 }
@@ -151,13 +164,19 @@ function ColumnHeader({ label, color }: { label: string; color: 'blue' | 'orange
   );
 }
 
-// Content block with colored background and optional delete
-function ContentBlock({ content, color, onDelete, suffix }: {
+// Content block with colored background, optional delete, and click-to-edit
+function ContentBlock({ content, color, onDelete, onSave, suffix }: {
   content: string;
   color: 'blue' | 'orange' | 'green' | 'purple';
   onDelete?: () => void;
+  onSave?: (content: string) => void;
   suffix?: React.ReactNode;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(content);
+
+  useEffect(() => { setValue(content); }, [content]);
+
   const bgColors = {
     blue: 'bg-blue-50 border-blue-100',
     orange: 'bg-orange-50 border-orange-100',
@@ -170,10 +189,49 @@ function ContentBlock({ content, color, onDelete, suffix }: {
     green: 'text-green-400 hover:text-green-600',
     purple: 'text-purple-400 hover:text-purple-600',
   };
+
+  const commitEdit = () => {
+    setEditing(false);
+    const trimmed = value.trim();
+    if (trimmed && trimmed !== content && onSave) {
+      onSave(trimmed);
+    } else {
+      setValue(content);
+    }
+  };
+
+  const editGlow = {
+    blue: 'shadow-[inset_0_0_8px_rgba(59,130,246,0.25)]',
+    orange: 'shadow-[inset_0_0_8px_rgba(249,115,22,0.25)]',
+    green: 'shadow-[inset_0_0_8px_rgba(34,197,94,0.25)]',
+    purple: 'shadow-[inset_0_0_8px_rgba(168,85,247,0.25)]',
+  };
+
+  if (editing) {
+    return (
+      <div className={`px-3 py-2 rounded-md border ${bgColors[color]} ${editGlow[color]} transition-shadow`}>
+        <Textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={commitEdit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitEdit(); }
+            if (e.key === 'Escape') { setEditing(false); setValue(content); }
+          }}
+          autoFocus
+          className={`text-sm ${columnColors[color].text} field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none`}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={`px-3 py-2 rounded-md border ${bgColors[color]} group/block`}>
       <div className="flex items-start justify-between gap-2">
-        <p className={`text-sm ${columnColors[color].text}`}>
+        <p
+          className={`text-sm ${columnColors[color].text} ${onSave ? 'cursor-text' : ''}`}
+          onClick={onSave ? () => setEditing(true) : undefined}
+        >
           {content}
           {suffix}
         </p>
@@ -207,6 +265,9 @@ function ProjectContent() {
   const [projectName, setProjectName] = useState('Untitled Project');
   const [isEditingName, setIsEditingName] = useState(false);
   const [isArchived, setIsArchived] = useState(false);
+  const [pasteModalOpen, setPasteModalOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteLoading, setPasteLoading] = useState(false);
   const [newObservation, setNewObservation] = useState('');
 
   // Core data
@@ -288,12 +349,30 @@ function ProjectContent() {
   const [inlineAdd, setInlineAdd] = useState<{ parentId: string; type: 'harm' | 'criterion' | 'strategy' } | null>(null);
 
   // Observation coaching — debounced AI feedback
+  const coachingAbortRef = useRef<AbortController | null>(null);
+
+  const cancelCoaching = useCallback(() => {
+    if (coachingTimerRef.current) {
+      clearTimeout(coachingTimerRef.current);
+      coachingTimerRef.current = null;
+    }
+    if (coachingAbortRef.current) {
+      coachingAbortRef.current.abort();
+      coachingAbortRef.current = null;
+    }
+    setCoachingText(null);
+    setLoadingCoaching(false);
+  }, []);
+
   const handleObservationChange = useCallback((text: string) => {
     setNewObservation(text);
     setCoachingText(null);
 
     if (coachingTimerRef.current) {
       clearTimeout(coachingTimerRef.current);
+    }
+    if (coachingAbortRef.current) {
+      coachingAbortRef.current.abort();
     }
 
     if (!text.trim() || text.trim().length < 10) {
@@ -302,9 +381,12 @@ function ProjectContent() {
     }
 
     coachingTimerRef.current = setTimeout(async () => {
+      const abortController = new AbortController();
+      coachingAbortRef.current = abortController;
       setLoadingCoaching(true);
       try {
         const results = await fetchSuggestions('observationCoaching', { observation: text.trim() });
+        if (abortController.signal.aborted) return;
         const coaching = results[0] || '';
         if (coaching && coaching !== 'GOOD') {
           setCoachingText(coaching);
@@ -312,9 +394,12 @@ function ProjectContent() {
           setCoachingText(null);
         }
       } catch (error) {
+        if (abortController.signal.aborted) return;
         console.error('Error fetching coaching:', error);
       } finally {
-        setLoadingCoaching(false);
+        if (!abortController.signal.aborted) {
+          setLoadingCoaching(false);
+        }
       }
     }, 2000);
   }, []);
@@ -426,7 +511,7 @@ function ProjectContent() {
     if (!newObservation.trim()) return null;
     const content = newObservation.trim();
     setNewObservation('');
-    setCoachingText(null);
+    cancelCoaching();
 
     if (db) {
       try {
@@ -584,22 +669,26 @@ function ProjectContent() {
     }
   };
 
-  const addCustomHarm = async (obsId: string) => {
+  const addCustomHarm = async (obsId: string): Promise<string | null> => {
     const content = customHarmInputs[obsId]?.trim();
-    if (!content) return;
+    if (!content) return null;
     setCustomHarmInputs(prev => ({ ...prev, [obsId]: '' }));
 
     if (db) {
       try {
         const id = await createHarm(projectId, [obsId], content);
         setHarms([...harms, { id, projectId, observationIds: [obsId], content, createdAt: new Date() }]);
+        return id;
       } catch (error) {
         console.error('Error creating harm:', error);
         showError('Failed to save harm', error);
         setCustomHarmInputs(prev => ({ ...prev, [obsId]: content }));
+        return null;
       }
     } else {
-      setHarms([...harms, { id: crypto.randomUUID(), projectId, observationIds: [obsId], content, createdAt: new Date() }]);
+      const id = crypto.randomUUID();
+      setHarms([...harms, { id, projectId, observationIds: [obsId], content, createdAt: new Date() }]);
+      return id;
     }
   };
 
@@ -650,9 +739,9 @@ function ProjectContent() {
     }
   };
 
-  const addCustomCriterion = async (harmId: string) => {
+  const addCustomCriterion = async (harmId: string): Promise<string | null> => {
     const content = customCriterionInputs[harmId]?.trim();
-    if (!content) return;
+    if (!content) return null;
     setCustomCriterionInputs(prev => ({ ...prev, [harmId]: '' }));
 
     if (db) {
@@ -660,13 +749,17 @@ function ProjectContent() {
         const id = await createCriterion(projectId, harmId, content);
         setCriteria([...criteria, { id, projectId, harmId, content }]);
         maybeGenerateTitle(harmId, content);
+        return id;
       } catch (error) {
         console.error('Error creating criterion:', error);
         showError('Failed to save criterion', error);
         setCustomCriterionInputs(prev => ({ ...prev, [harmId]: content }));
+        return null;
       }
     } else {
-      setCriteria([...criteria, { id: crypto.randomUUID(), harmId, content }]);
+      const id = crypto.randomUUID();
+      setCriteria([...criteria, { id, harmId, content }]);
+      return id;
     }
   };
 
@@ -804,10 +897,64 @@ function ProjectContent() {
     }
   };
 
+  const handlePasteObservations = async () => {
+    const lines = pasteText.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+    setPasteLoading(true);
+    try {
+      const newObs: Observation[] = [];
+      for (const line of lines) {
+        if (db) {
+          const id = await createObservation(projectId, line);
+          newObs.push({ id, projectId, content: line, createdAt: new Date() });
+        } else {
+          const id = crypto.randomUUID();
+          newObs.push({ id, projectId, content: line, createdAt: new Date() });
+        }
+      }
+      setObservations(prev => [...prev, ...newObs]);
+      setPasteText('');
+      setPasteModalOpen(false);
+    } catch (error) {
+      console.error('Error pasting observations:', error);
+      showError('Failed to paste observations', error);
+    } finally {
+      setPasteLoading(false);
+    }
+  };
+
   const handleSaveObservationTitle = async (obsId: string, title: string) => {
     setObservations(prev => prev.map(o => o.id === obsId ? { ...o, title } : o));
     if (db) {
       updateObservation(obsId, { title }).catch(e => console.error('Failed to save title:', e));
+    }
+  };
+
+  const handleSaveObservationContent = async (obsId: string, content: string) => {
+    setObservations(prev => prev.map(o => o.id === obsId ? { ...o, content } : o));
+    if (db) {
+      updateObservation(obsId, { content }).catch(e => console.error('Failed to save observation:', e));
+    }
+  };
+
+  const handleSaveHarmContent = async (harmId: string, content: string) => {
+    setHarms(prev => prev.map(h => h.id === harmId ? { ...h, content } : h));
+    if (db) {
+      updateHarm(harmId, { content }).catch(e => console.error('Failed to save harm:', e));
+    }
+  };
+
+  const handleSaveCriterionContent = async (criterionId: string, content: string) => {
+    setCriteria(prev => prev.map(c => c.id === criterionId ? { ...c, content } : c));
+    if (db) {
+      updateCriterion(criterionId, { content }).catch(e => console.error('Failed to save criterion:', e));
+    }
+  };
+
+  const handleSaveStrategyContent = async (strategyId: string, content: string) => {
+    setStrategies(prev => prev.map(s => s.id === strategyId ? { ...s, content } : s));
+    if (db) {
+      updateStrategy(strategyId, { content }).catch(e => console.error('Failed to save strategy:', e));
     }
   };
 
@@ -987,13 +1134,26 @@ function ProjectContent() {
               </Button>
             </div>
 
-            {/* Insight title */}
-            <div className="mb-6">
+            {/* Insight title + duplicate */}
+            <div className="flex items-center justify-between mb-6">
               <InsightTitle
                 title={detailObs.title}
                 onSave={(title) => handleSaveObservationTitle(detailObs.id, title)}
                 className="text-2xl"
               />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  const id = await handleAddObservationFromBranch(detailObs.id, detailObs.content);
+                  if (id) {
+                    setDetailItem({ type: 'observation', id });
+                  }
+                }}
+                className="gap-1 text-muted-foreground"
+              >
+                <DuplicateIcon /> Duplicate
+              </Button>
             </div>
 
             {/* 4-column grid */}
@@ -1002,7 +1162,7 @@ function ProjectContent() {
               {/* Column 1: Observation (blue) */}
               <div className="space-y-3">
                 <ColumnHeader label="Observation" color="blue" />
-                <ContentBlock content={detailObs.content} color="blue" />
+                <ContentBlock content={detailObs.content} color="blue" onSave={(c) => handleSaveObservationContent(detailObs.id, c)} />
                 {(coachingText || loadingCoaching) && (
                   <CoachingArea>
                     {loadingCoaching ? (
@@ -1025,20 +1185,34 @@ function ProjectContent() {
                         content={obsHarm.content}
                         color="orange"
                         onDelete={() => handleDeleteHarm(obsHarm.id)}
+                        onSave={(c) => handleSaveHarmContent(obsHarm.id, c)}
                       />
                     );
                   }
                   return (
                     <>
-                      <Input
-                        placeholder="What harm could come from this?"
-                        value={customHarmInputs[detailObs.id] || ''}
-                        onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [detailObs.id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && addCustomHarm(detailObs.id)}
-                        onFocus={() => handleHarmInputFocus(detailObs.id)}
-                        autoFocus
-                        className="text-sm h-8"
-                      />
+                      <div className="space-y-1">
+                        <div className="px-3 py-2 rounded-md border bg-orange-50 border-orange-100 shadow-[inset_0_0_8px_rgba(249,115,22,0.25)] transition-shadow">
+                          <Textarea
+                            placeholder="What harm could come from this?"
+                            value={customHarmInputs[detailObs.id] || ''}
+                            onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [detailObs.id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                addCustomHarm(detailObs.id);
+                              } else if (e.key === 'Escape') {
+                                setCustomHarmInputs(prev => ({ ...prev, [detailObs.id]: '' }));
+                                (e.target as HTMLTextAreaElement).blur();
+                              }
+                            }}
+                            onFocus={() => handleHarmInputFocus(detailObs.id)}
+                            autoFocus
+                            className="text-sm text-orange-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-orange-300"
+                          />
+                        </div>
+                        <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
+                      </div>
                       <CoachingArea>
                         <SuggestionPanel
                           suggestions={harmSuggestions[detailObs.id]}
@@ -1061,32 +1235,49 @@ function ProjectContent() {
                     return <p className="text-xs text-muted-foreground italic">Add a harm first</p>;
                   }
                   const harmCriteria = getCriteriaForHarm(harm.id);
+                  const existingCrit = harmCriteria[0];
                   return (
                     <>
-                      {harmCriteria.map((crit) => (
+                      {existingCrit ? (
                         <ContentBlock
-                          key={crit.id}
-                          content={crit.content}
+                          content={existingCrit.content}
                           color="green"
-                          onDelete={() => handleDeleteCriterion(crit.id)}
+                          onDelete={() => handleDeleteCriterion(existingCrit.id)}
+                          onSave={(c) => handleSaveCriterionContent(existingCrit.id, c)}
                         />
-                      ))}
-                      <Input
-                        placeholder="The solution should..."
-                        value={customCriterionInputs[harm.id] || ''}
-                        onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
-                        onKeyDown={(e) => e.key === 'Enter' && addCustomCriterion(harm.id)}
-                        onFocus={() => handleCriterionInputFocus(harm.id)}
-                        className="text-sm h-8"
-                      />
-                      <CoachingArea>
-                        <SuggestionPanel
-                          suggestions={criterionSuggestions[harm.id]}
-                          loading={loadingCriterionSuggestions[harm.id]}
-                          onToggle={(sid) => toggleCriterionSuggestion(harm.id, sid)}
-                          onGenerateMore={() => generateMoreCriterionSuggestions(harm.id)}
-                        />
-                      </CoachingArea>
+                      ) : (
+                        <>
+                          <div className="space-y-1">
+                            <div className="px-3 py-2 rounded-md border bg-green-50 border-green-100 shadow-[inset_0_0_8px_rgba(34,197,94,0.25)] transition-shadow">
+                              <Textarea
+                                placeholder="The solution should..."
+                                value={customCriterionInputs[harm.id] || ''}
+                                onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    addCustomCriterion(harm.id);
+                                  } else if (e.key === 'Escape') {
+                                    setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: '' }));
+                                    (e.target as HTMLTextAreaElement).blur();
+                                  }
+                                }}
+                                onFocus={() => handleCriterionInputFocus(harm.id)}
+                                className="text-sm text-green-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-green-300"
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
+                          </div>
+                          <CoachingArea>
+                            <SuggestionPanel
+                              suggestions={criterionSuggestions[harm.id]}
+                              loading={loadingCriterionSuggestions[harm.id]}
+                              onToggle={(sid) => toggleCriterionSuggestion(harm.id, sid)}
+                              onGenerateMore={() => generateMoreCriterionSuggestions(harm.id)}
+                            />
+                          </CoachingArea>
+                        </>
+                      )}
                     </>
                   );
                 })()}
@@ -1116,19 +1307,33 @@ function ProjectContent() {
                             content={strat.content}
                             color="purple"
                             onDelete={() => handleDeleteStrategy(strat.id)}
+                            onSave={(c) => handleSaveStrategyContent(strat.id, c)}
                             suffix={strat.strategyType ? (
                               <span className="text-xs text-purple-400 ml-1">({strat.strategyType})</span>
                             ) : undefined}
                           />
                         ))}
-                        <Input
-                          placeholder="How might we...?"
-                          value={customStrategyInputs[crit.id] || ''}
-                          onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
-                          onKeyDown={(e) => e.key === 'Enter' && addCustomStrategy(crit.id)}
-                          onFocus={() => handleStrategyInputFocus(crit.id)}
-                          className="text-sm h-8"
-                        />
+                        <div className="space-y-1">
+                          <div className="px-3 py-2 rounded-md border bg-purple-50 border-purple-100 shadow-[inset_0_0_8px_rgba(168,85,247,0.25)] transition-shadow">
+                            <Textarea
+                              placeholder="How might we...?"
+                              value={customStrategyInputs[crit.id] || ''}
+                              onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                  e.preventDefault();
+                                  addCustomStrategy(crit.id);
+                                } else if (e.key === 'Escape') {
+                                  setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: '' }));
+                                  (e.target as HTMLTextAreaElement).blur();
+                                }
+                              }}
+                              onFocus={() => handleStrategyInputFocus(crit.id)}
+                              className="text-sm text-purple-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-purple-300"
+                            />
+                          </div>
+                          <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
+                        </div>
                         <CoachingArea>
                           <SuggestionPanel
                             suggestions={strategySuggestions[crit.id]}
@@ -1205,11 +1410,60 @@ function ProjectContent() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                <Button variant="ghost" size="sm" onClick={handleToggleArchive} className="text-muted-foreground">
-                  {isArchived ? 'Unarchive' : 'Archive'}
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="sm" className="text-muted-foreground">
+                      <SettingsIcon />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setPasteModalOpen(true)}>
+                      Paste Observations
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={handleToggleArchive}>
+                      {isArchived ? 'Unarchive' : 'Archive'}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
+
+            {/* Paste Observations Modal */}
+            {pasteModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setPasteModalOpen(false)}>
+                <div className="bg-background rounded-lg border shadow-lg p-6 w-full max-w-lg mx-4 space-y-4" onClick={e => e.stopPropagation()}>
+                  <h3 className="text-lg font-semibold">Paste Observations</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Paste a list of observations, one per line. Each line becomes a new card.
+                  </p>
+                  <Textarea
+                    value={pasteText}
+                    onChange={e => setPasteText(e.target.value)}
+                    placeholder={"Observation one\nObservation two\nObservation three"}
+                    className="min-h-[200px]"
+                    autoFocus
+                  />
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">
+                      {pasteText.split('\n').filter(l => l.trim()).length} observations
+                    </span>
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setPasteModalOpen(false)}>
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={handlePasteObservations}
+                        disabled={pasteLoading || !pasteText.trim()}
+                      >
+                        {pasteLoading ? 'Adding...' : 'Add All'}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Card Grid */}
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -1227,6 +1481,10 @@ function ProjectContent() {
                       setInlineAdd={setInlineAdd}
                       setDetailItem={setDetailItem}
                       handleSaveObservationTitle={handleSaveObservationTitle}
+                      handleSaveObservationContent={handleSaveObservationContent}
+                      handleSaveHarmContent={handleSaveHarmContent}
+                      handleSaveCriterionContent={handleSaveCriterionContent}
+                      handleSaveStrategyContent={handleSaveStrategyContent}
                       handleDeleteHarm={handleDeleteHarm}
                       handleDeleteCriterion={handleDeleteCriterion}
                       handleDeleteStrategy={handleDeleteStrategy}
@@ -1307,6 +1565,10 @@ function SortableCard({
   setInlineAdd,
   setDetailItem,
   handleSaveObservationTitle,
+  handleSaveObservationContent,
+  handleSaveHarmContent,
+  handleSaveCriterionContent,
+  handleSaveStrategyContent,
   handleDeleteHarm,
   handleDeleteCriterion,
   handleDeleteStrategy,
@@ -1329,16 +1591,20 @@ function SortableCard({
   setInlineAdd: (v: { parentId: string; type: 'harm' | 'criterion' | 'strategy' } | null) => void;
   setDetailItem: (v: DetailItem | null) => void;
   handleSaveObservationTitle: (obsId: string, title: string) => void;
+  handleSaveObservationContent: (obsId: string, content: string) => void;
+  handleSaveHarmContent: (harmId: string, content: string) => void;
+  handleSaveCriterionContent: (criterionId: string, content: string) => void;
+  handleSaveStrategyContent: (strategyId: string, content: string) => void;
   handleDeleteHarm: (harmId: string) => void;
   handleDeleteCriterion: (criterionId: string) => void;
   handleDeleteStrategy: (strategyId: string) => void;
   handleAddObservationFromBranch: (sourceObsId: string, content: string) => Promise<string | null>;
   customHarmInputs: Record<string, string>;
   setCustomHarmInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  addCustomHarm: (obsId: string) => void;
+  addCustomHarm: (obsId: string) => Promise<string | null>;
   customCriterionInputs: Record<string, string>;
   setCustomCriterionInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  addCustomCriterion: (harmId: string) => void;
+  addCustomCriterion: (harmId: string) => Promise<string | null>;
   customStrategyInputs: Record<string, string>;
   setCustomStrategyInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   addCustomStrategy: (criterionId: string) => void;
@@ -1398,54 +1664,46 @@ function SortableCard({
         </div>
 
         {/* Observation */}
-        <div className="px-3 py-2 rounded-md bg-blue-50 border border-blue-100">
-          <p className="text-sm text-blue-900">{obs.content}</p>
-        </div>
+        <ContentBlock content={obs.content} color="blue" onSave={(c) => handleSaveObservationContent(obs.id, c)} />
 
         {/* Harms */}
         {obsHarms.map((harm) => {
           const harmCriteria = getCriteriaForHarm(harm.id);
           return (
             <div key={harm.id} className="space-y-2">
-              <div
-                className="px-3 py-2 rounded-md bg-orange-50 border border-orange-100 cursor-pointer hover:border-orange-200 transition-colors group/harm"
-                onClick={() => setInlineAdd(
-                  inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion'
-                    ? null
-                    : { parentId: harm.id, type: 'criterion' }
-                )}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm text-orange-900">{harm.content}</p>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); handleDeleteHarm(harm.id); }}
-                    className="opacity-0 group-hover/harm:opacity-100 transition-opacity text-orange-400 hover:text-orange-600 shrink-0"
-                  >
-                    <XIcon size={12} />
-                  </button>
-                </div>
-              </div>
+              <ContentBlock
+                content={harm.content}
+                color="orange"
+                onDelete={() => handleDeleteHarm(harm.id)}
+                onSave={(c) => handleSaveHarmContent(harm.id, c)}
+              />
 
               {/* Inline add criterion */}
               {inlineAdd && inlineAdd.parentId === harm.id && inlineAdd.type === 'criterion' && (
-                <div className="ml-3 space-y-1">
-                  <Input
-                    autoFocus
-                    placeholder="What design criterion applies?"
-                    value={customCriterionInputs[harm.id] || ''}
-                    onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        addCustomCriterion(harm.id);
-                      } else if (e.key === 'Escape') {
-                        setInlineAdd(null);
-                      }
-                    }}
-                    onBlur={() => {
-                      if (!customCriterionInputs[harm.id]?.trim()) setInlineAdd(null);
-                    }}
-                    className="text-sm h-8 bg-green-50 border-green-200 placeholder:text-green-300"
-                  />
+                <div className="space-y-1">
+                  <div className="px-3 py-2 rounded-md border bg-green-50 border-green-100 shadow-[inset_0_0_8px_rgba(34,197,94,0.25)] transition-shadow">
+                    <Textarea
+                      autoFocus
+                      placeholder="What design criterion applies?"
+                      value={customCriterionInputs[harm.id] || ''}
+                      onChange={(e) => setCustomCriterionInputs(prev => ({ ...prev, [harm.id]: e.target.value }))}
+                      onKeyDown={async (e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          const critId = await addCustomCriterion(harm.id);
+                          if (critId) {
+                            setInlineAdd({ parentId: critId, type: 'strategy' });
+                          }
+                        } else if (e.key === 'Escape') {
+                          setInlineAdd(null);
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!customCriterionInputs[harm.id]?.trim()) setInlineAdd(null);
+                      }}
+                      className="text-sm text-green-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-green-300"
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
                 </div>
               )}
@@ -1454,69 +1712,53 @@ function SortableCard({
               {harmCriteria.map((crit) => {
                 const critStrategies = getStrategiesForCriterion(crit.id);
                 return (
-                  <div key={crit.id} className="ml-3 space-y-1">
-                    <div
-                      className="px-3 py-2 rounded-md bg-green-50 border border-green-100 cursor-pointer hover:border-green-200 transition-colors group/crit"
-                      onClick={() => setInlineAdd(
-                        inlineAdd?.parentId === crit.id && inlineAdd?.type === 'strategy'
-                          ? null
-                          : { parentId: crit.id, type: 'strategy' }
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm text-green-900">{crit.content}</p>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleDeleteCriterion(crit.id); }}
-                          className="opacity-0 group-hover/crit:opacity-100 transition-opacity text-green-400 hover:text-green-600 shrink-0"
-                        >
-                          <XIcon size={12} />
-                        </button>
-                      </div>
-                    </div>
+                  <div key={crit.id} className="space-y-1">
+                    <ContentBlock
+                      content={crit.content}
+                      color="green"
+                      onDelete={() => handleDeleteCriterion(crit.id)}
+                      onSave={(c) => handleSaveCriterionContent(crit.id, c)}
+                    />
 
                     {/* Strategies under this criterion */}
                     {critStrategies.map((strat) => (
-                      <div
-                        key={strat.id}
-                        className="ml-3 px-3 py-2 rounded-md bg-purple-50 border border-purple-100 group/strat"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm text-purple-900">
-                            {strat.content}
-                            {strat.strategyType && (
-                              <span className="text-xs text-purple-400 ml-1">({strat.strategyType})</span>
-                            )}
-                          </p>
-                          <button
-                            onClick={() => handleDeleteStrategy(strat.id)}
-                            className="opacity-0 group-hover/strat:opacity-100 transition-opacity text-purple-400 hover:text-purple-600 shrink-0"
-                          >
-                            <XIcon size={12} />
-                          </button>
-                        </div>
+                      <div key={strat.id}>
+                        <ContentBlock
+                          content={strat.content}
+                          color="purple"
+                          onDelete={() => handleDeleteStrategy(strat.id)}
+                          onSave={(c) => handleSaveStrategyContent(strat.id, c)}
+                          suffix={strat.strategyType ? (
+                            <span className="text-xs text-purple-400 ml-1">({strat.strategyType})</span>
+                          ) : undefined}
+                        />
                       </div>
                     ))}
 
                     {/* Inline add strategy */}
                     {inlineAdd && inlineAdd.parentId === crit.id && inlineAdd.type === 'strategy' && (
-                      <div className="ml-3 space-y-1">
-                        <Input
-                          autoFocus
-                          placeholder="How might we...?"
-                          value={customStrategyInputs[crit.id] || ''}
-                          onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              addCustomStrategy(crit.id);
-                            } else if (e.key === 'Escape') {
-                              setInlineAdd(null);
-                            }
-                          }}
-                          onBlur={() => {
-                            if (!customStrategyInputs[crit.id]?.trim()) setInlineAdd(null);
-                          }}
-                          className="text-sm h-8 bg-purple-50 border-purple-200 placeholder:text-purple-300"
-                        />
+                      <div className="space-y-1">
+                        <div className="px-3 py-2 rounded-md border bg-purple-50 border-purple-100 shadow-[inset_0_0_8px_rgba(168,85,247,0.25)] transition-shadow">
+                          <Textarea
+                            autoFocus
+                            placeholder="How might we...?"
+                            value={customStrategyInputs[crit.id] || ''}
+                            onChange={(e) => setCustomStrategyInputs(prev => ({ ...prev, [crit.id]: e.target.value }))}
+                            onKeyDown={async (e) => {
+                              if (e.key === 'Enter' && !e.shiftKey) {
+                                e.preventDefault();
+                                await addCustomStrategy(crit.id);
+                                setInlineAdd(null);
+                              } else if (e.key === 'Escape') {
+                                setInlineAdd(null);
+                              }
+                            }}
+                            onBlur={() => {
+                              if (!customStrategyInputs[crit.id]?.trim()) setInlineAdd(null);
+                            }}
+                            className="text-sm text-purple-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-purple-300"
+                          />
+                        </div>
                         <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
                       </div>
                     )}
@@ -1530,82 +1772,91 @@ function SortableCard({
         {/* Inline add input — harm (if no harm yet) */}
         {inlineAdd && inlineAdd.parentId === obs.id && inlineAdd.type === 'harm' && (
           <div className="space-y-1">
-            <Input
-              autoFocus
-              placeholder="What harm could come from this?"
-              value={customHarmInputs[obs.id] || ''}
-              onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [obs.id]: e.target.value }))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  addCustomHarm(obs.id);
-                } else if (e.key === 'Escape') {
-                  setInlineAdd(null);
-                }
-              }}
-              onBlur={() => {
-                if (!customHarmInputs[obs.id]?.trim()) setInlineAdd(null);
-              }}
-              className="text-sm h-8 bg-orange-50 border-orange-200 placeholder:text-orange-300"
-            />
+            <div className="px-3 py-2 rounded-md border bg-orange-50 border-orange-100 shadow-[inset_0_0_8px_rgba(249,115,22,0.25)] transition-shadow">
+              <Textarea
+                autoFocus
+                placeholder="What harm could come from this?"
+                value={customHarmInputs[obs.id] || ''}
+                onChange={(e) => setCustomHarmInputs(prev => ({ ...prev, [obs.id]: e.target.value }))}
+                onKeyDown={async (e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    const harmId = await addCustomHarm(obs.id);
+                    if (harmId) {
+                      setInlineAdd({ parentId: harmId, type: 'criterion' });
+                    }
+                  } else if (e.key === 'Escape') {
+                    setInlineAdd(null);
+                  }
+                }}
+                onBlur={() => {
+                  if (!customHarmInputs[obs.id]?.trim()) setInlineAdd(null);
+                }}
+                className="text-sm text-orange-900 field-sizing-content min-h-[2rem] resize-none bg-transparent border-0 p-0 focus-visible:ring-0 shadow-none placeholder:text-orange-300"
+              />
+            </div>
             <p className="text-xs text-muted-foreground">Enter to add · Esc to cancel</p>
           </div>
         )}
 
-        {/* Context-aware add button + branch */}
+        {/* Context-aware add button + duplicate */}
         <div className="flex gap-2">
           {obsHarms.length === 0 ? (
-            /* No harm yet — "+" adds a harm */
-            <button
-              onClick={() => setInlineAdd(
-                inlineAdd?.parentId === obs.id && inlineAdd?.type === 'harm'
-                  ? null
-                  : { parentId: obs.id, type: 'harm' }
-              )}
-              className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
-            >
-              <PlusIcon /> <span>add harm</span>
-            </button>
+            (() => {
+              const isActive = inlineAdd?.parentId === obs.id && inlineAdd?.type === 'harm';
+              return (
+                <button
+                  onClick={() => setInlineAdd(isActive ? null : { parentId: obs.id, type: 'harm' })}
+                  className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+                >
+                  {isActive ? <span>cancel</span> : <><PlusIcon /> <span>add harm</span></>}
+                </button>
+              );
+            })()
           ) : (
-            /* Has a harm — "+" adds to the deepest available level */
-            <>
-              <button
-                onClick={() => {
-                  const harm = obsHarms[0];
-                  const harmCrit = getCriteriaForHarm(harm.id);
-                  if (harmCrit.length === 0) {
-                    // No criteria yet — add criterion
-                    setInlineAdd(
-                      inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion'
-                        ? null
-                        : { parentId: harm.id, type: 'criterion' }
-                    );
-                  } else {
-                    // Has criteria — add strategy to the last criterion
-                    const lastCrit = harmCrit[harmCrit.length - 1];
-                    setInlineAdd(
-                      inlineAdd?.parentId === lastCrit.id && inlineAdd?.type === 'strategy'
-                        ? null
-                        : { parentId: lastCrit.id, type: 'strategy' }
-                    );
-                  }
-                }}
-                className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
-              >
-                <PlusIcon />
-              </button>
-              {/* Branch: duplicate observation with a different harm */}
-              <button
-                onClick={async () => {
-                  const id = await handleAddObservationFromBranch(obs.id, obs.content);
-                  if (id) setInlineAdd({ parentId: id, type: 'harm' });
-                }}
-                className="flex items-center justify-center gap-1 py-2 px-3 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
-                title="Branch: explore a different harm from this observation"
-              >
-                <ForkIcon />
-              </button>
-            </>
+            (() => {
+              const harm = obsHarms[0];
+              const harmCrit = getCriteriaForHarm(harm.id);
+              const addLabel = harmCrit.length === 0 ? 'add criterion' : 'add strategy';
+              const isActive = harmCrit.length === 0
+                ? (inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion')
+                : (inlineAdd?.parentId === harmCrit[harmCrit.length - 1]?.id && inlineAdd?.type === 'strategy');
+              return (
+                <button
+                  onClick={() => {
+                    if (harmCrit.length === 0) {
+                      setInlineAdd(
+                        inlineAdd?.parentId === harm.id && inlineAdd?.type === 'criterion'
+                          ? null
+                          : { parentId: harm.id, type: 'criterion' }
+                      );
+                    } else {
+                      const lastCrit = harmCrit[harmCrit.length - 1];
+                      setInlineAdd(
+                        inlineAdd?.parentId === lastCrit.id && inlineAdd?.type === 'strategy'
+                          ? null
+                          : { parentId: lastCrit.id, type: 'strategy' }
+                      );
+                    }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1 py-2 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+                >
+                  {isActive ? <span>cancel</span> : <><PlusIcon /> <span>{addLabel}</span></>}
+                </button>
+              );
+            })()
           )}
+          {/* Duplicate card */}
+          <button
+            onClick={async () => {
+              const id = await handleAddObservationFromBranch(obs.id, obs.content);
+              if (id) setInlineAdd({ parentId: id, type: 'harm' });
+            }}
+            className="flex items-center justify-center gap-1 py-2 px-3 rounded-md border border-dashed border-border text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-colors text-xs"
+            title="Duplicate card"
+          >
+            <DuplicateIcon />
+          </button>
         </div>
       </CardContent>
     </Card>
@@ -1680,7 +1931,7 @@ function SuggestionPanel({
           )}
         </div>
       ))}
-      {!loading && (
+      {!loading && visible.length > 0 && (
         <button
           onClick={onGenerateMore}
           className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"

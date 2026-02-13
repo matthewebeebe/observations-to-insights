@@ -217,6 +217,13 @@ export async function createHarm(projectId: string, observationIds: string[], co
   return docRef.id;
 }
 
+export async function updateHarm(harmId: string, data: Partial<{ content: string }>): Promise<void> {
+  if (!db) throw new Error('Firestore not initialized');
+
+  const docRef = doc(db, 'harms', harmId);
+  await updateDoc(docRef, data);
+}
+
 export async function deleteHarm(harmId: string): Promise<void> {
   if (!db) throw new Error('Firestore not initialized');
 
@@ -262,6 +269,13 @@ export async function createCriterion(projectId: string, harmId: string, content
   updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
+}
+
+export async function updateCriterion(criterionId: string, data: Partial<{ content: string }>): Promise<void> {
+  if (!db) throw new Error('Firestore not initialized');
+
+  const docRef = doc(db, 'criteria', criterionId);
+  await updateDoc(docRef, data);
 }
 
 export async function deleteCriterion(criterionId: string): Promise<void> {
@@ -321,6 +335,13 @@ export async function createStrategy(
   updateProject(projectId, {}).catch(e => console.error('Failed to update project timestamp:', e));
 
   return docRef.id;
+}
+
+export async function updateStrategy(strategyId: string, data: Partial<{ content: string }>): Promise<void> {
+  if (!db) throw new Error('Firestore not initialized');
+
+  const docRef = doc(db, 'strategies', strategyId);
+  await updateDoc(docRef, data);
 }
 
 export async function deleteStrategy(strategyId: string): Promise<void> {
